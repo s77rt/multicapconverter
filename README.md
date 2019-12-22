@@ -29,7 +29,7 @@ optional arguments:
 - Output only authentication handshakes or all handshakes
 
 ## Examples
-Assume we have a capture file 'capture.cap' which includes 4 handshakes:
+We have a capture file 'capture.cap' which includes 4 handshakes:
 
 | # | BSSID             | ESSID    | AUTHENTICATED |
 |---|-------------------|----------|---------------|
