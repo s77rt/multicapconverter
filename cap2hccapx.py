@@ -423,8 +423,8 @@ DB = Database()
 
 def read_file(file):
 	if file.lower().endswith('.gz'):
-		return gzip.open(args.input, 'rb')
-	return open(args.input, 'rb')
+		return gzip.open(file, 'rb')
+	return open(file, 'rb')
 
 def read_pcap_file_header(pcap):
 	try:
