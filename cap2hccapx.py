@@ -733,7 +733,7 @@ def read_packets(pcap, pcap_file_header, bitness):
 					if header['caplen'] < SIZE_OF_ieee80211_radiotap_header_t:
 						packet_error = 'Could not read radiotap header'
 						raise ValueError(packet_error)
-					ieee80211_radiotap_header = dict(ieee80211_radiotap_header_t._asdict(ieee80211_radiotap_header_t._make(struct.unpack('=BBHI', read(SIZE_OF_ieee80211_radiotap_header_t)))))
+					ieee80211_radiotap_header = dict(ieee80211_radiotap_header_t._asdict(ieee80211_radiotap_header_t._make(struct.unpack('=BBHI', packet[:SIZE_OF_ieee80211_radiotap_header_t]))))
 					if BIG_ENDIAN_HOST:
 						ieee80211_radiotap_header['it_len']     = byte_swap_16(ieee80211_radiotap_header['it_len'])
 						ieee80211_radiotap_header['it_present'] = byte_swap_32(ieee80211_radiotap_header['it_present'])
@@ -747,7 +747,7 @@ def read_packets(pcap, pcap_file_header, bitness):
 					if header['caplen'] < SIZE_OF_ppi_packet_header_t:
 						packet_error = 'Could not read ppi header'
 						raise ValueError(packet_error)
-					ppi_packet_header = dict(ppi_packet_header_t._asdict(ppi_packet_header_t._make(struct.unpack('=BBHI', read(SIZE_OF_ppi_packet_header_t)))))
+					ppi_packet_header = dict(ppi_packet_header_t._asdict(ppi_packet_header_t._make(struct.unpack('=BBHI', packet[:SIZE_OF_ppi_packet_header_t]))))
 					if BIG_ENDIAN_HOST:
 						ppi_packet_header['pph_len']    = byte_swap_16(ppi_packet_header['pph_len'])
 					packet = packet[ppi_packet_header['pph_len']:]
