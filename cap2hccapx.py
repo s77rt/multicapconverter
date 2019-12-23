@@ -14,6 +14,7 @@ import struct
 import copy
 import errno
 import re
+import gzip
 from collections import namedtuple
 from operator import itemgetter
 from itertools import groupby, islice
@@ -419,6 +420,11 @@ class Database(object):
 			self.hccapxs = [{'key': k, 'raw_data': [x['raw_data'] for x in v]} for k, v in self.hccapxs]
 DB = Database()
 ###
+
+def read_file(file):
+	if file.lower().endswith('.gz'):
+		return gzip.open(args.input, 'rb')
+	return open(args.input, 'rb')
 
 def read_pcap_file_header(pcap):
 	try:
@@ -906,7 +912,7 @@ def build_hccapx(export_unauthenticated=False, filters=None, group_by=None):
 
 def main():
 	if os.path.isfile(args.input):
-		pcap = open(args.input, 'rb')
+		pcap = read_file(args.input)
 		try:
 			pcap_file_header, bitness = read_pcap_file_header(pcap)
 			read_packets(pcap, pcap_file_header, bitness)
@@ -928,7 +934,7 @@ def main():
 						hccapx_filename = (re.sub('\\.hccap(x?)$', '', args.output, flags=re.IGNORECASE)) + get_valid_filename("{}.hccapx".format("_"+str(key['key']) if key['key'] != "none" else ''))
 					else:
 						if key['key'] == "none":
-							hccapx_filename = re.sub('\\.(p?)cap$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
+							hccapx_filename = re.sub('\\.(p?)cap((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
 						else:
 							hccapx_filename = get_valid_filename("{}.hccapx".format(str(key['key'])))
 					print(hccapx_filename)

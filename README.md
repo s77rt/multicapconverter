@@ -24,6 +24,7 @@ optional arguments:
 
 ## Features
 - Supports combined .cap files
+- Supports gz compressed .cap files
 - Output hccapx files can be grouped
 - Output hccapx files can be filtered
 - Output only authentication handshakes or all handshakes
