@@ -39,6 +39,9 @@ HCCAPX_SIGNATURE = 0x58504348 # HCPX
 TCPDUMP_MAGIC  = 0xa1b2c3d4
 TCPDUMP_CIGAM  = 0xd4c3b2a1
 
+PCAPNG_MAGIC = 0x1A2B3C4D
+PCAPNG_CIGAM = 0xD4C3B2A1
+
 TCPDUMP_DECODE_LEN  = 65535
 
 DLT_NULL         = 0   #  BSD loopback encapsulation 
@@ -135,7 +138,18 @@ WPA_KEY_INFO_SECURE = WBIT(9)
 WPA_KEY_INFO_ERROR = WBIT(10)
 WPA_KEY_INFO_REQUEST = WBIT(11)
 WPA_KEY_INFO_ENCR_KEY_DATA = WBIT(12) #  IEEE 802.11i/RSN only 
-
+#
+Interface_Description_Block = 0x00000001
+Packet_Block                = 0x00000002
+Simple_Packet_Block         = 0x00000003
+Name_Resolution_Block       = 0x00000004
+Interface_Statistics_Block  = 0x00000005
+Enhanced_Packet_Block       = 0x00000006
+IRIG_Timestamp_Block        = 0x00000007
+Arinc_429_in_AFDX_Encapsulation_Information_Block = 0x00000008
+Section_Header_Block = 0x0A0D0D0A
+if_tsresol_code = 9
+#
 DB_ESSID_MAX  = 50000
 DB_EXCPKT_MAX = 100000
 
@@ -272,6 +286,13 @@ hccapx_t = namedtuple( \
 	  nonce_sta \
 	  eapol_len \
 	  eapol \
+')
+pcapng_general_block_structure = namedtuple( \
+	'pcapng_general_block', '\
+	  block_type \
+	  block_total_length \
+	  block_body \
+	  block_total_length_2 \
 ')
 ###
 
@@ -421,37 +442,6 @@ class Database(object):
 DB = Database()
 ###
 
-def read_file(file):
-	if file.lower().endswith('.gz'):
-		return gzip.open(file, 'rb')
-	return open(file, 'rb')
-
-def read_pcap_file_header(pcap):
-	try:
-		pcap_file_header =  dict(pcap_file_header_t._asdict(pcap_file_header_t._make(struct.unpack('=IHHIIII', pcap.read(SIZE_OF_pcap_file_header_t)))))
-	except struct.error:
-		raise ValueError('Could not read pcap header')
-	if BIG_ENDIAN_HOST:
-		pcap_file_header['magic']          = byte_swap_32(pcap_file_header['magic'])
-		pcap_file_header['version_major']  = byte_swap_16(pcap_file_header['version_major'])
-		pcap_file_header['version_minor']  = byte_swap_16(pcap_file_header['version_minor'])
-		pcap_file_header['thiszone']       = byte_swap_32(pcap_file_header['thiszone'])
-		pcap_file_header['sigfigs']        = byte_swap_32(pcap_file_header['sigfigs'])
-		pcap_file_header['snaplen']        = byte_swap_32(pcap_file_header['snaplen'])
-		pcap_file_header['linktype']       = byte_swap_32(pcap_file_header['linktype'])
-	if pcap_file_header['magic'] == TCPDUMP_MAGIC:
-		bitness = 0
-	elif pcap_file_header['magic'] == TCPDUMP_CIGAM:
-		bitness = 1
-	else:
-		raise ValueError('Invalid pcap header')
-	if (pcap_file_header['linktype'] != DLT_IEEE802_11) \
-	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PRISM) \
-	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_RADIO) \
-	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PPI_HDR):
-		raise ValueError('Unsupported linktype detected')
-	return pcap_file_header, bitness
-
 def get_essid_from_tag(packet, header, length_skip):
 	if length_skip > header['caplen']:
 		return -1, None
@@ -533,6 +523,85 @@ def handle_auth(auth_packet, rest_packet, pkt_offset, pkt_size):
 	if (excpkt_num == exc_pkt_num_t.EXC_PKT_NUM_3.value) or (excpkt_num == exc_pkt_num_t.EXC_PKT_NUM_4.value):
 		excpkt['replay_counter'] -= 1
 	return 0, excpkt
+
+##############################################################################################
+
+def read_file(file):
+	if file.lower().endswith('.gz'):
+		return gzip.open(file, 'rb')
+	return open(file, 'rb')
+
+def read_pcap_file_header(pcap):
+	try:
+		pcap_file_header =  dict(pcap_file_header_t._asdict(pcap_file_header_t._make(struct.unpack('=IHHIIII', pcap.read(SIZE_OF_pcap_file_header_t)))))
+	except struct.error:
+		raise ValueError('Could not read pcap header')
+	if BIG_ENDIAN_HOST:
+		pcap_file_header['magic']          = byte_swap_32(pcap_file_header['magic'])
+		pcap_file_header['version_major']  = byte_swap_16(pcap_file_header['version_major'])
+		pcap_file_header['version_minor']  = byte_swap_16(pcap_file_header['version_minor'])
+		pcap_file_header['thiszone']       = byte_swap_32(pcap_file_header['thiszone'])
+		pcap_file_header['sigfigs']        = byte_swap_32(pcap_file_header['sigfigs'])
+		pcap_file_header['snaplen']        = byte_swap_32(pcap_file_header['snaplen'])
+		pcap_file_header['linktype']       = byte_swap_32(pcap_file_header['linktype'])
+	if pcap_file_header['magic'] == TCPDUMP_MAGIC:
+		bitness = 0
+	elif pcap_file_header['magic'] == TCPDUMP_CIGAM:
+		bitness = 1
+	else:
+		raise ValueError('Invalid pcap header')
+	if (pcap_file_header['linktype'] != DLT_IEEE802_11) \
+	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PRISM) \
+	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_RADIO) \
+	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PPI_HDR):
+		raise ValueError('Unsupported linktype detected')
+	return pcap_file_header, bitness
+
+def read_pcapng_file_header(pcapng):
+	def read_blocks(pcapng):
+		while True:
+			piece = pcapng.read(8)
+			if not piece:
+				break
+			block_total_length = struct.unpack('=II', piece)[1]
+			block_body_length = block_total_length - 12
+			body_unpacked = struct.unpack('=II{}BI'.format(block_body_length), piece+pcapng.read(block_body_length+4))
+			block = (dict(pcapng_general_block_structure._asdict(pcapng_general_block_structure._make(( \
+				body_unpacked[0], \
+				body_unpacked[1], \
+				tuple(x for x in body_unpacked[2:2+block_body_length]), \
+				body_unpacked[-1] \
+			)))))
+			yield block
+	blocks = read_blocks(pcapng)
+	for block in blocks:
+		if block['block_type'] == Section_Header_Block:
+			try:
+				network = next(blocks)
+			except:
+				break
+			xpcap_file_header = {}
+			xpcap_file_header['magic'] = block['block_body'][:4]
+			xpcap_file_header['version_major'] = block['block_body'][4:6]
+			xpcap_file_header['version_minor'] = block['block_body'][6:8]
+			xpcap_file_header['thiszone'] = 0
+			xpcap_file_header['sigfigs'] = 0
+			xpcap_file_header['snaplen'] = network['block_body'][2:4]
+			xpcap_file_header['linktype'] = network['block_body'][0]
+			if struct.unpack("I", struct.pack("4B", *xpcap_file_header['magic']))[0] == PCAPNG_MAGIC:
+				bitness = 0
+			elif struct.unpack("I", struct.pack("4B", *xpcap_file_header['magic']))[0] == PCAPNG_CIGAM:
+				bitness = 1
+			else:
+				continue
+			if (xpcap_file_header['linktype'] != DLT_IEEE802_11) \
+			  and (xpcap_file_header['linktype'] != DLT_IEEE802_11_PRISM) \
+			  and (xpcap_file_header['linktype'] != DLT_IEEE802_11_RADIO) \
+			  and (xpcap_file_header['linktype'] != DLT_IEEE802_11_PPI_HDR):
+				continue
+			yield xpcap_file_header, bitness, blocks
+
+##############################################################################################
 
 def process_packet(packet, header):
 	if (header['caplen'] < SIZE_OF_ieee80211_hdr_3addr_t):
@@ -642,7 +711,9 @@ def process_packet(packet, header):
 		elif excpkt['excpkt_num'] == exc_pkt_num_t.EXC_PKT_NUM_2.value or excpkt['excpkt_num'] == exc_pkt_num_t.EXC_PKT_NUM_4.value:
 			DB.excpkt_add(excpkt_num=excpkt['excpkt_num'], tv_sec=header['tv_sec'], tv_usec=header['tv_usec'], replay_counter=excpkt['replay_counter'], mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], nonce=excpkt['nonce'], eapol_len=excpkt['eapol_len'], eapol=excpkt['eapol'], keyver=excpkt['keyver'], keymic=excpkt['keymic'])
 
-def read_packets(pcap, pcap_file_header, bitness):
+##############################################################################################
+
+def read_pcap_packets(pcap, pcap_file_header, bitness):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -773,6 +844,134 @@ def read_packets(pcap, pcap_file_header, bitness):
 			raise ValueError(packet_error)
 		else:
 			raise ValueError('Something went wrong')
+
+def read_pcapng_packets(pcapng, pcapng_file_header, bitness):
+	header_count = 0
+	header_error = None
+	packet_count = 0
+	packet_error = None
+	while True:
+		try:
+			header_error = None
+			try:
+				header_block = next(pcapng)
+			except:
+				header_block = None
+			if not header_block:
+				break
+			if header_block['block_type'] == Enhanced_Packet_Block:
+				pass
+			elif header_block['block_type'] in [Simple_Packet_Block, Interface_Statistics_Block]:
+				continue
+			else:
+				break
+			header = {}
+
+			# header['tv_sec']  = byte_swap_64((struct.unpack("Q", struct.pack("8B", *header_block['block_body'][4:12]))[0]))
+			# if_tsresol ??
+			header['tv_sec']  = byte_swap_32((struct.unpack("I", struct.pack("4B", *header_block['block_body'][4:8]))[0]))
+			header['caplen']   = byte_swap_32(struct.unpack("I", struct.pack("4B", *header_block['block_body'][12:16]))[0])
+			header['len']      = byte_swap_32(struct.unpack("I", struct.pack("4B", *header_block['block_body'][16:20]))[0])
+			header['tv_sec']   = byte_swap_32(header['tv_sec'])
+			header['caplen']   = byte_swap_32(header['caplen'])
+			header['len']      = byte_swap_32(header['len'])
+			if BIG_ENDIAN_HOST:
+				header['tv_sec']   = byte_swap_32(header['tv_sec'])
+				header['caplen']   = byte_swap_32(header['caplen'])
+				header['len']      = byte_swap_32(header['len'])
+			if bitness:
+				header['tv_sec']   = byte_swap_32(header['tv_sec'])
+				header['caplen']   = byte_swap_32(header['caplen'])
+				header['len']      = byte_swap_32(header['len'])
+			if header['tv_sec'] == 0:
+				header_error = 'Zero value timestamps detected'
+				raise ValueError(header_error)
+			if header['caplen'] >= TCPDUMP_DECODE_LEN or to_signed_32(header['caplen']) < 0:
+				header_error = 'Oversized packet detected'
+				raise ValueError(header_error)
+			header['tv_usec'] = 0
+			header_count += 1
+			try:
+				packet_error = None
+				packet = bytes(header_block['block_body'][20:20+header['caplen']])
+				if pcapng_file_header['linktype'] == DLT_IEEE802_11_PRISM:
+					if header['caplen'] < SIZE_OF_prism_header_t:
+						packet_error = 'Could not read prism header'
+						raise ValueError(packet_error)
+					unpacked_packet = struct.unpack('=II16cIHHIIHHIIHHIIHHIIHHIIHHIIHHIIHHIIHHIIHHI', packet[:SIZE_OF_prism_header_t])
+					prism_header = dict(prism_header_t._asdict(prism_header_t._make(( \
+						unpacked_packet[0], \
+						unpacked_packet[1], \
+						(unpacked_packet[2], unpacked_packet[3], unpacked_packet[4], unpacked_packet[5], unpacked_packet[6], unpacked_packet[7], unpacked_packet[8], unpacked_packet[9], unpacked_packet[10], unpacked_packet[11], unpacked_packet[12], unpacked_packet[13], unpacked_packet[14], unpacked_packet[15], unpacked_packet[16], unpacked_packet[17]), \
+						dict(prism_item_t(unpacked_packet[18], unpacked_packet[19], unpacked_packet[20], unpacked_packet[21])._asdict()), \
+						dict(prism_item_t(unpacked_packet[22], unpacked_packet[23], unpacked_packet[24], unpacked_packet[25])._asdict()), \
+						dict(prism_item_t(unpacked_packet[26], unpacked_packet[27], unpacked_packet[28], unpacked_packet[29])._asdict()), \
+						dict(prism_item_t(unpacked_packet[30], unpacked_packet[31], unpacked_packet[32], unpacked_packet[33])._asdict()), \
+						dict(prism_item_t(unpacked_packet[34], unpacked_packet[35], unpacked_packet[36], unpacked_packet[37])._asdict()), \
+						dict(prism_item_t(unpacked_packet[38], unpacked_packet[39], unpacked_packet[40], unpacked_packet[41])._asdict()), \
+						dict(prism_item_t(unpacked_packet[42], unpacked_packet[43], unpacked_packet[44], unpacked_packet[45])._asdict()), \
+						dict(prism_item_t(unpacked_packet[46], unpacked_packet[47], unpacked_packet[48], unpacked_packet[49])._asdict()), \
+						dict(prism_item_t(unpacked_packet[50], unpacked_packet[51], unpacked_packet[52], unpacked_packet[53])._asdict()), \
+						dict(prism_item_t(unpacked_packet[54], unpacked_packet[55], unpacked_packet[56], unpacked_packet[57])._asdict()), \
+					))))
+					if BIG_ENDIAN_HOST:
+						prism_header['msgcode'] = byte_swap_32(prism_header['msgcode'])
+						prism_header['msglen']  = byte_swap_32(prism_header['msglen'])
+					if (to_signed_32(prism_header['msglen']) < 0):
+						packet_error = 'Oversized packet detected'
+						raise ValueError(packet_error)
+					if (to_signed_32(header['caplen'] - prism_header['msglen']) < 0):
+						packet_error = 'Oversized packet detected'
+						raise ValueError(packet_error)
+					packet = packet[prism_header['msglen']:]
+					header['caplen'] -= prism_header['msglen']
+					header['len']    -= prism_header['msglen']
+				elif pcapng_file_header['linktype'] == DLT_IEEE802_11_RADIO:
+					if header['caplen'] < SIZE_OF_ieee80211_radiotap_header_t:
+						packet_error = 'Could not read radiotap header'
+						raise ValueError(packet_error)
+					ieee80211_radiotap_header = dict(ieee80211_radiotap_header_t._asdict(ieee80211_radiotap_header_t._make(struct.unpack('=BBHI', packet[:SIZE_OF_ieee80211_radiotap_header_t]))))
+					if BIG_ENDIAN_HOST:
+						ieee80211_radiotap_header['it_len']     = byte_swap_16(ieee80211_radiotap_header['it_len'])
+						ieee80211_radiotap_header['it_present'] = byte_swap_32(ieee80211_radiotap_header['it_present'])
+					if ieee80211_radiotap_header['it_version'] != 0:
+						packet_error = 'Invalid radiotap header'
+						raise ValueError(packet_error)
+					packet = packet[ieee80211_radiotap_header['it_len']:]
+					header['caplen'] -= ieee80211_radiotap_header['it_len']
+					header['len']    -= ieee80211_radiotap_header['it_len']
+				elif pcapng_file_header['linktype'] == DLT_IEEE802_11_PPI_HDR:
+					if header['caplen'] < SIZE_OF_ppi_packet_header_t:
+						packet_error = 'Could not read ppi header'
+						raise ValueError(packet_error)
+					ppi_packet_header = dict(ppi_packet_header_t._asdict(ppi_packet_header_t._make(struct.unpack('=BBHI', packet[:SIZE_OF_ppi_packet_header_t]))))
+					if BIG_ENDIAN_HOST:
+						ppi_packet_header['pph_len']    = byte_swap_16(ppi_packet_header['pph_len'])
+					packet = packet[ppi_packet_header['pph_len']:]
+					header['caplen'] -= ppi_packet_header['pph_len']
+					header['len']    -= ppi_packet_header['pph_len']
+				packet_count += 1
+			except:
+				packet_error = 'Could not read pcap packet data'
+				raise ValueError(packet_error)
+		except (ValueError, struct.error) as error:
+			#print("@"+str(pcap.tell()+X)+" --> "+str(error))
+			continue
+		else:
+			try:
+				process_packet(packet, header)
+			except (ValueError, struct.error) as error:
+				#print("@"+str(pcap.tell()+X)+" --> "+str(error))
+				continue
+	if header_count == 0 or packet_count == 0:
+		if header_error:
+			raise ValueError(header_error)
+		elif packet_error:
+			raise ValueError(packet_error)
+		else:
+			raise ValueError('Something went wrong')
+
+##############################################################################################
 
 def build_hccapx(export_unauthenticated=False, filters=None, group_by=None):
 	for essid in DB.essids.values():
@@ -910,16 +1109,23 @@ def build_hccapx(export_unauthenticated=False, filters=None, group_by=None):
 				DB.hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
 	DB.hccapx_groupby(group_by)
 
+##############################################################################################
+
 def main():
 	if os.path.isfile(args.input):
-		pcap = read_file(args.input)
+		cap_file = read_file(args.input)
 		try:
-			pcap_file_header, bitness = read_pcap_file_header(pcap)
-			read_packets(pcap, pcap_file_header, bitness)
+			try:
+				pcap_file_header, bitness = read_pcap_file_header(cap_file)
+				read_pcap_packets(cap_file, pcap_file_header, bitness)
+			except:
+				cap_file.seek(0)
+				for pcapng_file_header, bitness, pcapng in read_pcapng_file_header(cap_file):
+					read_pcapng_packets(pcapng, pcapng_file_header, bitness)
 		except (ValueError, struct.error) as error:
 			exit(str(error))
 		else:
-			pcap.close()
+			cap_file.close()
 			if len(DB.essids) == 0:
 				exit("No Networks found\n")
 
@@ -934,7 +1140,7 @@ def main():
 						hccapx_filename = (re.sub('\\.hccap(x?)$', '', args.output, flags=re.IGNORECASE)) + get_valid_filename("{}.hccapx".format("_"+str(key['key']) if key['key'] != "none" else ''))
 					else:
 						if key['key'] == "none":
-							hccapx_filename = re.sub('\\.(p?)cap((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
+							hccapx_filename = re.sub('\\.(p?)cap((ng)?)((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
 						else:
 							hccapx_filename = get_valid_filename("{}.hccapx".format(str(key['key'])))
 					print(hccapx_filename)
@@ -948,8 +1154,11 @@ def main():
 	else:
 		exit(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input))
 
+##############################################################################################
+##############################################################################################
+
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser(description = 'Convert a WPA pcap capture file to a hashcat capture file', add_help=False)
+	parser = argparse.ArgumentParser(description = 'Convert a WPA cap/pcap/pcapng capture file to a hashcat capture file', add_help=False)
 	required = parser.add_argument_group('required arguments')
 	optional = parser.add_argument_group('optional arguments')
 	optional.add_argument(

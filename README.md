@@ -1,11 +1,11 @@
 # cap2hccapx.py
-Tool used to Convert a WPA pcap capture file to a hashcat capture file (re)written in Python ([c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
+Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat capture file (re)written in Python ([c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
 ```
 usage: cap2hccapx.py [-h] --input capture.cap [--output capture.hccapx]
                      [--all] [--filter-by filter-by filter]
                      [--group-by {none,bssid,essid,handshake}]
 
-Convert a WPA pcap capture file to a hashcat capture file
+Convert a WPA cap/pcap/pcapng capture file to a hashcat capture file
 
 required arguments:
   --input capture.cap, -i capture.cap
@@ -23,8 +23,9 @@ optional arguments:
 ```
 
 ## Features
-- Supports combined .cap files
-- Supports gz compressed .cap files
+- Supports cap/pcap/pcapng [BETA: pcapng]
+- Supports combined cap/pcap/(pcapng?) files
+- Supports gz compressed cap/pcap/pcapng files
 - Output hccapx files can be grouped
 - Output hccapx files can be filtered
 - Output only authentication handshakes or all handshakes
