@@ -1,15 +1,17 @@
 # cap2hccapx.py
-Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat capture file (re)written in Python ([c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
+Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hccapx/hcwpax file (re)written in Python ([c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
 ```
-usage: cap2hccapx.py [-h] --input capture.cap [--output capture.hccapx]
-                     [--all] [--filter-by filter-by filter]
+usage: cap2hccapx.py [-h] --input capture.cap --export {hccapx,hcwpax}
+                     [--output capture.hccapx] [--all]
+                     [--filter-by filter-by filter]
                      [--group-by {none,bssid,essid,handshake}]
 
-Convert a WPA cap/pcap/pcapng capture file to a hashcat capture file
+Convert a WPA cap/pcap/pcapng capture file to a hashcat hccapx/hcwpax file
 
 required arguments:
   --input capture.cap, -i capture.cap
                         Input capture file
+  --export {hccapx,hcwpax}, -x {hccapx,hcwpax}
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -26,9 +28,10 @@ optional arguments:
 - Supports cap/pcap/pcapng [BETA: pcapng]
 - Supports combined cap/pcap/(pcapng?) files
 - Supports gz compressed cap/pcap/pcapng files
-- Output hccapx files can be grouped
-- Output hccapx files can be filtered
-- Output only authentication handshakes or all handshakes
+- Export as hccapx (hashcat mode = 2500)
+- Export as hcwpax (hashcat mode = 22000)
+- Export only authenticated handshakes or all handshakes
+- Output hccapx files can be filtered/grouped
 
 ## Examples
 We have a capture file 'capture.cap' which includes 4 handshakes:
@@ -47,7 +50,7 @@ Also the original c version export all the handshakes even if they are not authe
 
 #### 1) Extract each handshake into a separated file (Auth Only)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by handshake
+python3 cap2hccapx.py -i capture.cap --group-by handshake -x hccapx
 ...
 Output files:
 00-00-00-00-AA-AA_0.hccapx // 2
@@ -56,7 +59,7 @@ Output files:
 ```
 #### 2) Extract each handshake into a separated file (All)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by handshake --all
+python3 cap2hccapx.py -i capture.cap --group-by handshake -x hccapx --all
 ...
 Output files:
 00-00-00-00-AA-AA_0.hccapx // 1
@@ -66,14 +69,14 @@ Output files:
 ```
 #### 3) Extract all handshakes into one file (just like the old c version)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by none --all
+python3 cap2hccapx.py -i capture.cap --group-by none -x hccapx --all
 ...
 Output files:
 capture.hccapx // 1, 2, 3 and 4
 ```
 #### 4) Extract handshakes based on BSSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by bssid --all
+python3 cap2hccapx.py -i capture.cap --group-by bssid -x hccapx --all
 ...
 Output files:
 00-00-00-00-AA-AA.hccapx // 1 and 2
@@ -82,7 +85,7 @@ Output files:
 ```
 #### 5) Extract handshakes based on ESSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by essid --all
+python3 cap2hccapx.py -i capture.cap --group-by essid -x hccapx --all
 ...
 Output files:
 Wifi.hccapx // 1, 2 and 4
@@ -90,7 +93,7 @@ Internet.hccapx // 3
 ```
 #### 6) Extract handshakes based on ESSID having a specific BSSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by essid --filter-by bssid 00:00:00:00:CC:CC --all
+python3 cap2hccapx.py -i capture.cap --group-by essid --filter-by bssid 00:00:00:00:CC:CC -x hccapx --all
 ...
 Output files:
 Wifi.hccapx // 4
@@ -98,4 +101,5 @@ Wifi.hccapx // 4
 ## TODO
  - Enhance performance and the way the script deals with structures
  - Custom output file formats
+ - Make use of message_pair "ap-less attack"
 
