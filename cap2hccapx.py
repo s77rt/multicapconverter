@@ -587,25 +587,39 @@ def read_pcapng_file_header(pcapng):
 			if not piece:
 				break
 			block_total_length = struct.unpack('=II', piece)[1]
+			if BIG_ENDIAN_HOST:
+				block_total_length = byte_swap_32(block_total_length)
 			block_body_length = block_total_length - 12
 			body_unpacked = struct.unpack('=II{}BI'.format(block_body_length), piece+pcapng.read(block_body_length+4))
+			block_type = body_unpacked[0]
+			block_length = body_unpacked[1]
+			block_body = tuple(x for x in body_unpacked[2:2+block_body_length])
+			if BIG_ENDIAN_HOST:
+				block_type = byte_swap_32(block_type)
+				block_length = byte_swap_32(block_length)
 			block = (dict(pcapng_general_block_structure._asdict(pcapng_general_block_structure._make(( \
-				body_unpacked[0], \
-				body_unpacked[1], \
-				tuple(x for x in body_unpacked[2:2+block_body_length]), \
-				body_unpacked[-1] \
+				block_type, \
+				block_length, \
+				block_body, \
+				block_length \
 			)))))
 			yield block
-	def read_options(options_block):
+	def read_options(options_block, bitness):
 		while True:
 			option = {}
 			try:
 				option['code'] = struct.unpack("H",struct.pack('2B', *options_block[0:2]))[0]
+				option['length'] = struct.unpack("H",struct.pack('2B', *options_block[2:4]))[0]
 			except:
 				break
+			if BIG_ENDIAN_HOST:
+				option['code'] = byte_swap_16(option['code'])
+				option['length'] = byte_swap_16(option['length'])
+			if bitness:
+				option['code'] = byte_swap_16(option['code'])
+				option['length'] = byte_swap_16(option['length'])
 			if option['code'] == opt_endofopt:
 				break
-			option['length'] = struct.unpack("H",struct.pack('2B', *options_block[2:4]))[0]
 			option['value'] = bytes(options_block[4:4+option['length']])
 			options_block = options_block[2+4+option['length']:]
 			yield option
@@ -624,22 +638,38 @@ def read_pcapng_file_header(pcapng):
 			pcapng_file_header['sigfigs'] = 0
 			pcapng_file_header['snaplen'] = network['block_body'][2:4]
 			pcapng_file_header['linktype'] = network['block_body'][0]
+			if BIG_ENDIAN_HOST:
+				pcapng_file_header['magic'] = byte_swap_32(pcapng_file_header['magic'])
+				pcapng_file_header['version_major'] = byte_swap_16(pcapng_file_header['version_major'])
+				pcapng_file_header['version_minor'] = byte_swap_16(pcapng_file_header['version_minor'])
+				pcapng_file_header['thiszone'] = byte_swap_32(pcapng_file_header['thiszone'])
+				pcapng_file_header['sigfigs'] = byte_swap_32(pcapng_file_header['sigfigs'])
+				pcapng_file_header['snaplen'] = byte_swap_32(pcapng_file_header['snaplen'])
+				pcapng_file_header['linktype'] = byte_swap_32(pcapng_file_header['linktype'])
 			if struct.unpack("I", struct.pack("4B", *pcapng_file_header['magic']))[0] == PCAPNG_MAGIC:
 				bitness = 0
 			elif struct.unpack("I", struct.pack("4B", *pcapng_file_header['magic']))[0] == PCAPNG_CIGAM:
+				pcapng_file_header['magic'] = byte_swap_32(pcapng_file_header['magic'])
+				pcapng_file_header['version_major'] = byte_swap_16(pcapng_file_header['version_major'])
+				pcapng_file_header['version_minor'] = byte_swap_16(pcapng_file_header['version_minor'])
+				pcapng_file_header['thiszone'] = byte_swap_32(pcapng_file_header['thiszone'])
+				pcapng_file_header['sigfigs'] = byte_swap_32(pcapng_file_header['sigfigs'])
+				pcapng_file_header['snaplen'] = byte_swap_32(pcapng_file_header['snaplen'])
+				pcapng_file_header['linktype'] = byte_swap_32(pcapng_file_header['linktype'])
 				bitness = 1
 			else:
 				continue
 			pcapng_file_header['section_options'] = []
-			for option in read_options(block['block_body'][16:]):
+			for option in read_options(block['block_body'][16:], bitness):
 				pcapng_file_header['section_options'].append(option)
 			if_tsresol = 6
 			pcapng_file_header['interface_options'] = []
-			for option in read_options(network['block_body'][8:]):
+			for option in read_options(network['block_body'][8:], bitness):
 				if option['code'] == if_tsresol_code:
 					if_tsresol = option['code']
 					## currently only supports if_tsresol = 6
 					if if_tsresol != 6:
+						print("Unsupported if_tsresol")
 						continue
 				pcapng_file_header['interface_options'].append(option)
 			if (pcapng_file_header['linktype'] != DLT_IEEE802_11) \
@@ -761,14 +791,14 @@ def process_packet(packet, header):
 
 ######################### READ PACKETS #########################
 
-def read_pcap_packets(pcap, pcap_file_header, bitness):
+def read_pcap_packets(cap_file, pcap_file_header, bitness):
 	header_count = 0
 	header_error = None
 	packet_count = 0
 	packet_error = None
 	chunk = None
 	def read(n_bytes):
-		nonlocal pcap
+		nonlocal cap_file
 		nonlocal chunk
 		try:
 			m1 = bytes(islice(chunk, n_bytes))
@@ -776,12 +806,12 @@ def read_pcap_packets(pcap, pcap_file_header, bitness):
 				return m1
 		except:
 			m1 = b''
-		chunk = iter(m1 +pcap.read(CHUNK_SIZE))
+		chunk = iter(m1 +cap_file.read(CHUNK_SIZE))
 		m2 = bytes(islice(chunk, n_bytes))
 		if len(m2) == n_bytes:
 			return m2
 		while True:
-			chunk = iter(m2 +pcap.read(CHUNK_SIZE))
+			chunk = iter(m2 +cap_file.read(CHUNK_SIZE))
 			m2_tmp = bytes(islice(chunk, n_bytes))
 			if not m2_tmp or m2 == m2_tmp:
 				break
@@ -891,7 +921,7 @@ def read_pcap_packets(pcap, pcap_file_header, bitness):
 		else:
 			raise ValueError('Something went wrong')
 
-def read_pcapng_packets(pcapng, pcapng_file_header, bitness, if_tsresol):
+def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -907,10 +937,11 @@ def read_pcapng_packets(pcapng, pcapng_file_header, bitness, if_tsresol):
 				break
 			if header_block['block_type'] == Enhanced_Packet_Block:
 				pass
-			elif header_block['block_type'] in [Simple_Packet_Block, Interface_Statistics_Block]:
-				continue
-			else:
+			elif header_block['block_type'] == Section_Header_Block:
+				cap_file.seek(cap_file.tell()-header_block['block_total_length'])
 				break
+			else:
+				continue
 			header = {}
 			timestamp_high = struct.unpack("I", struct.pack("4B", *header_block['block_body'][4:8]))[0]
 			timestamp_low = struct.unpack("I", struct.pack("4B", *header_block['block_body'][8:12]))[0]
@@ -1169,10 +1200,10 @@ def main():
 	if os.path.isfile(args.input):
 		cap_file = read_file(args.input)
 		try:
-			if args.input.lower().endswith('.pcapng'):
+			if args.input.lower().endswith('.pcapng') or args.input.lower().endswith('.pcapng.gz'):
 				try:
 					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(pcapng, pcapng_file_header, bitness, if_tsresol)
+						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol)
 				except:
 					cap_file.seek(0)
 					pcap_file_header, bitness = read_pcap_file_header(cap_file)
@@ -1184,7 +1215,7 @@ def main():
 				except:
 					cap_file.seek(0)
 					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(pcapng, pcapng_file_header, bitness, if_tsresol)
+						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol)
 		except (ValueError, struct.error) as error:
 			exit(str(error))
 		else:
@@ -1195,26 +1226,25 @@ def main():
 			print("Networks detected: {}".format(len(DB.essids)))
 			build(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by)
 
-			if args.export == "hccapx":
+			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
-				if len(DB.hccapxs):
-					print("\nOutput files:")
-					for key in DB.hccapxs:
-						if args.output:
-							hccapx_filename = (re.sub('\\.hccap(x?)$', '', args.output, flags=re.IGNORECASE)) + get_valid_filename("{}.hccapx".format("_"+str(key['key']) if key['key'] != "none" else ''))
+				print("\nOutput files:")
+				for key in DB.hccapxs:
+					if args.output:
+						hccapx_filename = (re.sub('\\.hccap(x?)$', '', args.output, flags=re.IGNORECASE)) + get_valid_filename("{}.hccapx".format("_"+str(key['key']) if key['key'] != "none" else ''))
+					else:
+						if key['key'] == "none":
+							hccapx_filename = re.sub('\\.(p?)cap((ng)?)((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
 						else:
-							if key['key'] == "none":
-								hccapx_filename = re.sub('\\.(p?)cap((ng)?)((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccapx"
-							else:
-								hccapx_filename = get_valid_filename("{}.hccapx".format(str(key['key'])))
-						print(hccapx_filename)
-						hccapx = open(hccapx_filename, 'wb')
-						hccapx.write(b''.join(key['raw_data']))
-						hccapx.close()
-						written += len(key['raw_data'])
-					if written:
-						print("\nWritten {} WPA Handshakes to {} files".format(written, len(DB.hccapxs)), end='')
-			elif len(DB.hcwpaxs):
+							hccapx_filename = get_valid_filename("{}.hccapx".format(str(key['key'])))
+					print(hccapx_filename)
+					hccapx = open(hccapx_filename, 'wb')
+					hccapx.write(b''.join(key['raw_data']))
+					hccapx.close()
+					written += len(key['raw_data'])
+				if written:
+					print("\nWritten {} WPA Handshakes to {} files".format(written, len(DB.hccapxs)), end='')
+			elif args.export == "hcwpax" and len(DB.hcwpaxs):
 				print("\nhcWPAx:")
 				for hcwpax in DB.hcwpaxs:
 					print('*'.join(hcwpax.values()))

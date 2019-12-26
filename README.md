@@ -26,7 +26,7 @@ optional arguments:
 
 ## Features
 - Supports cap/pcap/pcapng [BETA: pcapng]
-- Supports combined cap/pcap/(pcapng?) files
+- Supports combined cap/pcap/pcapng files
 - Supports gz compressed cap/pcap/pcapng files
 - Export as hccapx (hashcat mode = 2500)
 - Export as hcwpax (hashcat mode = 22000)
