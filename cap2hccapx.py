@@ -11,7 +11,6 @@ import os
 import sys
 import argparse
 import struct
-import copy
 import errno
 import re
 import gzip
@@ -19,6 +18,7 @@ from collections import namedtuple
 from operator import itemgetter
 from itertools import groupby, islice
 from enum import Enum
+from multiprocessing import Process, Manager
 
 ### Endianness ###
 if sys.byteorder == "big":
@@ -210,6 +210,7 @@ AK_FT_SAE = 9
 
 DB_ESSID_MAX  = 50000
 DB_EXCPKT_MAX = 100000
+MAX_WORK_PER_PROCESS = 50
 
 CHUNK_SIZE = 8192
 ###
@@ -588,35 +589,34 @@ def get_pmkid_from_packet(packet, source):
 			tag_len = packet[pos+1]
 			tag_data = packet[pos+2:pos+2+tag_len]
 			if tag_id == 48:
-				tag_version = tag_data[0:2]
-				tag_group_cipher_suite = tag_data[2:6]
+				#tag_version = tag_data[0:2]
+				#tag_group_cipher_suite = tag_data[2:6]
 				# Pairwise Cipher Suite
 				tag_pairwise_suite_count = struct.unpack('=H', tag_data[6:8])[0]
 				if BIG_ENDIAN_HOST:
 					tag_pairwise_suite_count = byte_swap_16(tag_pairwise_suite_count)
-				tag_pairwise_suite = []
+				#tag_pairwise_suite = []
 				pos = 8
-				for i in range(0, tag_pairwise_suite_count):
-					pos += (4*i)+4
-					tag_pairwise_suite.append(tag_data[pos-4:pos])
+				#for i in range(0, tag_pairwise_suite_count):
+				#	pos += (4*i)+4
+				#	tag_pairwise_suite.append(tag_data[pos-4:pos])
+				pos += (4*tag_pairwise_suite_count)+4
 				# AKM Suite
 				tag_authentication_suite_count = struct.unpack('=H', tag_data[pos:pos+2])[0]
 				if BIG_ENDIAN_HOST:
 					tag_authentication_suite_count = byte_swap_16(tag_authentication_suite_count)
-				tag_authentication_suite = []
+				#tag_authentication_suite = []
 				pos = pos+2
+				skip = 0
 				for i in range(0, tag_authentication_suite_count):
 					pos += (4*i)+4
-					tag_authentication_suite.append(tag_data[pos-4:pos])
-				###############
-				skip = 0
-				for akm in tag_authentication_suite:
+					akm = tag_data[pos-4:pos]
 					if akm[0:3] != bytes(SUITE_OUI) or akm[3] not in [AK_PSK, AK_PSKSHA256]:
 						skip = 1
 				if skip == 1:
 					break
 				###############
-				tag_capabilities = tag_data[pos:pos+2]
+				#tag_capabilities = tag_data[pos:pos+2]
 				##############################
 				try:
 					pmkid_count = struct.unpack('=H', tag_data[pos+2:pos+4])[0]
@@ -628,10 +628,7 @@ def get_pmkid_from_packet(packet, source):
 						pmkid = tag_data[pos-16:pos].hex()
 						if pmkid != '0'*32:
 							yield pmkid
-						else:
-							yield None
 				except:
-					yield None
 					break
 				##############################
 			pos = pos+2+tag_len
@@ -677,7 +674,7 @@ def handle_auth(auth_packet, rest_packet, pkt_offset, pkt_size):
 		return -1, None
 	if (SIZE_OF_auth_packet_t + ap_wpa_key_data_length) > SIZE_OF_EAPOL:
 		return -1, None
-	auth_packet_orig = copy.deepcopy(auth_packet)
+	auth_packet_orig = auth_packet.copy()
 	if BIG_ENDIAN_HOST:
 		auth_packet_orig['length']              = byte_swap_16(auth_packet_orig['length'])
 		auth_packet_orig['key_information']     = byte_swap_16(auth_packet_orig['key_information'])
@@ -1255,176 +1252,219 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 ######################### OUTPUT #########################
 
 def build(export, export_unauthenticated=False, filters=None, group_by=None):
-	for essid in DB.essids.values():
-		bssid = bytes(essid['bssid']).hex()
-		essidf = essid['essid'].decode(encoding='utf-8', errors='ignore').rstrip('\x00')
-		bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
-		xprint('\n[*] BSSID={} ESSID={} (Length: {}){}'.format( \
-			bssidf, \
-			essidf, \
-			essid['essid_len'], \
-			' [Skipped]' if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid) else '' \
-		))
-		if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid):
-			continue
-		for excpkt_ap in DB.excpkts.values():
-			if excpkt_ap['mac_ap'] != essid['bssid']:
+	# Workers Manager
+	manager = Manager()
+
+	# Lists were we store requested DB operations from our workers
+	DB_hcwpaxs_add_list = manager.list()
+	DB_hccapx_add_list = manager.list()
+	DB_hccapx_groupby_list = manager.list()
+
+	# Helper functions to store each DB req to the right list
+	def DB_hcwpaxs_add(**kwords):
+		DB_hcwpaxs_add_list.append(kwords)
+	def DB_hccapx_add(**kwords):
+		DB_hccapx_add_list.append(kwords)
+	def DB_hccapx_groupby(**kwords):
+		DB_hccapx_groupby_list.append(kwords)
+
+	# The work (building)
+	def build_chunk(essid_list, DB_hcwpaxs_add_list, DB_hccapx_add_list, DB_hccapx_groupby_list):
+		nonlocal export
+		nonlocal export_unauthenticated
+		nonlocal filters
+		nonlocal group_by
+		for essid in essid_list.values():
+			bssid = bytes(essid['bssid']).hex()
+			essidf = essid['essid'].decode(encoding='utf-8', errors='ignore').rstrip('\x00')
+			bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
+			xprint('\n[*] BSSID={} ESSID={} (Length: {}){}'.format( \
+				bssidf, \
+				essidf, \
+				essid['essid_len'], \
+				' [Skipped]' if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid) else '' \
+			))
+			if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid):
 				continue
-			for excpkt_sta in DB.excpkts.values():
-				if excpkt_sta['mac_ap'] != excpkt_ap['mac_ap']:
+			for excpkt_ap in DB.excpkts.values():
+				if excpkt_ap['mac_ap'] != essid['bssid']:
 					continue
-				if excpkt_sta['mac_sta'] != excpkt_ap['mac_sta']:
-					continue
-				### PMKID ###
-				pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
-				if pmkid and pmkid['pmkid']:
-					DB.hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
-				#############
-				if excpkt_ap['excpkt_num'] != EXC_PKT_NUM_1 and excpkt_ap['excpkt_num'] != EXC_PKT_NUM_3:
-					continue
-				if excpkt_sta['excpkt_num'] != EXC_PKT_NUM_2 and excpkt_sta['excpkt_num'] != EXC_PKT_NUM_4:
-					continue
-				valid_replay_counter = True if (excpkt_ap['replay_counter'] == excpkt_sta['replay_counter']) else False
-				if excpkt_ap['excpkt_num'] < excpkt_sta['excpkt_num']:
-					if excpkt_ap['tv_sec'] > excpkt_sta['tv_sec']:
+				for excpkt_sta in DB.excpkts.values():
+					if excpkt_sta['mac_ap'] != excpkt_ap['mac_ap']:
 						continue
-					if (excpkt_ap['tv_sec'] + EAPOL_TTL) < excpkt_sta['tv_sec']:
+					if excpkt_sta['mac_sta'] != excpkt_ap['mac_sta']:
 						continue
-				else:
-					if excpkt_sta['tv_sec'] > excpkt_ap['tv_sec']:
+					### PMKID ###
+					if export == "hcwpax":
+						pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
+						if pmkid:
+							DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+					#############
+					if excpkt_ap['excpkt_num'] != EXC_PKT_NUM_1 and excpkt_ap['excpkt_num'] != EXC_PKT_NUM_3:
 						continue
-					if (excpkt_sta['tv_sec'] + EAPOL_TTL) < excpkt_ap['tv_sec']:
+					if excpkt_sta['excpkt_num'] != EXC_PKT_NUM_2 and excpkt_sta['excpkt_num'] != EXC_PKT_NUM_4:
 						continue
-				message_pair = 255
-				if (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_1) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_2):
-					if excpkt_sta['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M12E2
-					else:
-						continue
-				elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_1) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_4):
-					if excpkt_sta['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M14E4
-					else:
-						continue
-				elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_3) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_2):
-					if excpkt_sta['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M32E2
-					elif excpkt_ap['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M32E3
-					else:
-						continue
-				elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_3) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_4):
-					if excpkt_ap['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M34E3
-					elif excpkt_sta['eapol_len'] > 0:
-						message_pair = MESSAGE_PAIR_M34E4
-					else:
-						continue
-				else:
-					xprint('[!] BUG! AP:{} STA:{}'.format(excpkt_ap['excpkt_num'], excpkt_sta['excpkt_num']))
-				skip = 0
-				auth = 1
-				ap_less = 0
-				if message_pair == MESSAGE_PAIR_M32E3 or message_pair == MESSAGE_PAIR_M34E3:
-					skip = 1
-				if message_pair == MESSAGE_PAIR_M12E2:
-					auth = 0
-					if DB.pcapng_info.get('hcxdumptool'):
-						for pcapng_info in DB.pcapng_info['hcxdumptool']:
-							check_1 = False
-							check_2 = False
-							for info in pcapng_info:
-								if info['code'] == HCXDUMPTOOL_OPTIONCODE_RC:
-									if excpkt_ap['replay_counter'] == info['value']:
-										check_1 = True
-								elif info['code'] == HCXDUMPTOOL_OPTIONCODE_ANONCE:
-									if bytes(excpkt_ap['nonce']) == info['value']:
-										check_2 = True
-							if check_1 and check_2 and message_pair & MESSAGE_PAIR_APLESS != MESSAGE_PAIR_APLESS:
-								ap_less = 1
-								message_pair |= MESSAGE_PAIR_APLESS
-								break
-				for excpkt_ap_k in DB.excpkts.values():
-					if (excpkt_ap['nonce'][:28] == excpkt_ap_k['nonce'][:28]) and (excpkt_ap['nonce'][28:] != excpkt_ap_k['nonce'][28:]):
-						if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
-							message_pair |= MESSAGE_PAIR_NC
-						if excpkt_ap['nonce'][31] != excpkt_ap_k['nonce'][31]:
-							if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
-								message_pair |= MESSAGE_PAIR_LE
-						elif excpkt_ap['nonce'][28] != excpkt_ap_k['nonce'][28]:
-							if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
-								message_pair |= MESSAGE_PAIR_BE
-				if not valid_replay_counter and message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
-					message_pair |= MESSAGE_PAIR_NC
-				mac_sta = bytes(excpkt_sta['mac_sta']).hex()
-				if skip == 0:
-					if auth == 1:
-						xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=Y'.format( \
-							':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-							message_pair, \
-							excpkt_sta['replay_counter'] \
-						))
-					else:
-						xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=N{}{}'.format( \
-							':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-							message_pair, \
-							excpkt_sta['replay_counter'], \
-							'' if export_unauthenticated else ' [Skipped]', \
-							' (AP-LESS)' if ap_less else '' \
-						))
-						if not export_unauthenticated:
+					valid_replay_counter = True if (excpkt_ap['replay_counter'] == excpkt_sta['replay_counter']) else False
+					if excpkt_ap['excpkt_num'] < excpkt_sta['excpkt_num']:
+						if excpkt_ap['tv_sec'] > excpkt_sta['tv_sec']:
 							continue
-				else:
-					xprint(' --> STA={}, Message Pair={} [Skipped]'.format( \
-						':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-						message_pair \
-					))
-					continue
-				hccapx_to_pack = {}
-				hccapx_to_pack['signature'] = HCCAPX_SIGNATURE
-				hccapx_to_pack['version'] = HCCAPX_VERSION
-				hccapx_to_pack['message_pair'] = message_pair
-				hccapx_to_pack['essid_len'] = essid['essid_len']
-				hccapx_to_pack['essid'] = essid['essid']
-				hccapx_to_pack['mac_ap'] = excpkt_ap['mac_ap']
-				hccapx_to_pack['nonce_ap'] = excpkt_ap['nonce']
-				hccapx_to_pack['mac_sta'] = excpkt_sta['mac_sta']
-				hccapx_to_pack['nonce_sta'] = excpkt_sta['nonce']
-				if excpkt_sta['eapol_len'] > 0:
-					hccapx_to_pack['keyver'] = excpkt_sta['keyver']
-					hccapx_to_pack['keymic'] = excpkt_sta['keymic']
-					hccapx_to_pack['eapol_len'] = excpkt_sta['eapol_len']
-					hccapx_to_pack['eapol'] = excpkt_sta['eapol']
-				else:
-					hccapx_to_pack['keyver'] = excpkt_ap['keyver']
-					hccapx_to_pack['keymic'] = excpkt_ap['keymic']
-					hccapx_to_pack['eapol_len'] = excpkt_ap['eapol_len']
-					hccapx_to_pack['eapol'] = excpkt_ap['eapol']
-				hccapx_to_pack['essid'] = struct.unpack('=32B', hccapx_to_pack['essid'])
-				hccapx_to_pack['eapol'] = struct.unpack('=256B', hccapx_to_pack['eapol'])
-				if BIG_ENDIAN_HOST:
-					hccapx_to_pack['signature']  = byte_swap_32(hccapx_to_pack['signature'])
-					hccapx_to_pack['version']    = byte_swap_32(hccapx_to_pack['version'])
-					hccapx_to_pack['eapol_len']  = byte_swap_16(hccapx_to_pack['eapol_len'])
-				hccapx = struct.pack('=IIBB32BB16B6B32B6B32BH256B',	\
-					hccapx_to_pack['signature'], \
-					hccapx_to_pack['version'], \
-					hccapx_to_pack['message_pair'], \
-					hccapx_to_pack['essid_len'], \
-					*hccapx_to_pack['essid'], \
-					hccapx_to_pack['keyver'], \
-					*hccapx_to_pack['keymic'], \
-					*hccapx_to_pack['mac_ap'], \
-					*hccapx_to_pack['nonce_ap'], \
-					*hccapx_to_pack['mac_sta'], \
-					*hccapx_to_pack['nonce_sta'], \
-					hccapx_to_pack['eapol_len'], \
-					*hccapx_to_pack['eapol'] \
-				)
-				DB.hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
-				DB.hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
-	if export == "hccapx":
-		DB.hccapx_groupby(group_by)
+						if (excpkt_ap['tv_sec'] + EAPOL_TTL) < excpkt_sta['tv_sec']:
+							continue
+					else:
+						if excpkt_sta['tv_sec'] > excpkt_ap['tv_sec']:
+							continue
+						if (excpkt_sta['tv_sec'] + EAPOL_TTL) < excpkt_ap['tv_sec']:
+							continue
+					message_pair = 255
+					if (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_1) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_2):
+						if excpkt_sta['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M12E2
+						else:
+							continue
+					elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_1) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_4):
+						if excpkt_sta['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M14E4
+						else:
+							continue
+					elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_3) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_2):
+						if excpkt_sta['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M32E2
+						elif excpkt_ap['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M32E3
+						else:
+							continue
+					elif (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_3) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_4):
+						if excpkt_ap['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M34E3
+						elif excpkt_sta['eapol_len'] > 0:
+							message_pair = MESSAGE_PAIR_M34E4
+						else:
+							continue
+					else:
+						xprint('[!] BUG! AP:{} STA:{}'.format(excpkt_ap['excpkt_num'], excpkt_sta['excpkt_num']))
+					skip = 0
+					auth = 1
+					ap_less = 0
+					if message_pair == MESSAGE_PAIR_M32E3 or message_pair == MESSAGE_PAIR_M34E3:
+						skip = 1
+					if message_pair == MESSAGE_PAIR_M12E2:
+						auth = 0
+						if DB.pcapng_info.get('hcxdumptool'):
+							for pcapng_info in DB.pcapng_info['hcxdumptool']:
+								check_1 = False
+								check_2 = False
+								for info in pcapng_info:
+									if info['code'] == HCXDUMPTOOL_OPTIONCODE_RC:
+										if excpkt_ap['replay_counter'] == info['value']:
+											check_1 = True
+									elif info['code'] == HCXDUMPTOOL_OPTIONCODE_ANONCE:
+										if bytes(excpkt_ap['nonce']) == info['value']:
+											check_2 = True
+								if check_1 and check_2 and message_pair & MESSAGE_PAIR_APLESS != MESSAGE_PAIR_APLESS:
+									ap_less = 1
+									message_pair |= MESSAGE_PAIR_APLESS
+									break
+					for excpkt_ap_k in DB.excpkts.values():
+						if (excpkt_ap['nonce'][:28] == excpkt_ap_k['nonce'][:28]) and (excpkt_ap['nonce'][28:] != excpkt_ap_k['nonce'][28:]):
+							if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
+								message_pair |= MESSAGE_PAIR_NC
+							if excpkt_ap['nonce'][31] != excpkt_ap_k['nonce'][31]:
+								if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
+									message_pair |= MESSAGE_PAIR_LE
+							elif excpkt_ap['nonce'][28] != excpkt_ap_k['nonce'][28]:
+								if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
+									message_pair |= MESSAGE_PAIR_BE
+					if not valid_replay_counter and message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
+						message_pair |= MESSAGE_PAIR_NC
+					mac_sta = bytes(excpkt_sta['mac_sta']).hex()
+					if skip == 0:
+						if auth == 1:
+							xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=Y'.format( \
+								':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+								message_pair, \
+								excpkt_sta['replay_counter'] \
+							))
+						else:
+							xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=N{}{}'.format( \
+								':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+								message_pair, \
+								excpkt_sta['replay_counter'], \
+								'' if export_unauthenticated else ' [Skipped]', \
+								' (AP-LESS)' if ap_less else '' \
+							))
+							if not export_unauthenticated:
+								continue
+					else:
+						xprint(' --> STA={}, Message Pair={} [Skipped]'.format( \
+							':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+							message_pair \
+						))
+						continue
+					hccapx_to_pack = {}
+					hccapx_to_pack['signature'] = HCCAPX_SIGNATURE
+					hccapx_to_pack['version'] = HCCAPX_VERSION
+					hccapx_to_pack['message_pair'] = message_pair
+					hccapx_to_pack['essid_len'] = essid['essid_len']
+					hccapx_to_pack['essid'] = essid['essid']
+					hccapx_to_pack['mac_ap'] = excpkt_ap['mac_ap']
+					hccapx_to_pack['nonce_ap'] = excpkt_ap['nonce']
+					hccapx_to_pack['mac_sta'] = excpkt_sta['mac_sta']
+					hccapx_to_pack['nonce_sta'] = excpkt_sta['nonce']
+					if excpkt_sta['eapol_len'] > 0:
+						hccapx_to_pack['keyver'] = excpkt_sta['keyver']
+						hccapx_to_pack['keymic'] = excpkt_sta['keymic']
+						hccapx_to_pack['eapol_len'] = excpkt_sta['eapol_len']
+						hccapx_to_pack['eapol'] = excpkt_sta['eapol']
+					else:
+						hccapx_to_pack['keyver'] = excpkt_ap['keyver']
+						hccapx_to_pack['keymic'] = excpkt_ap['keymic']
+						hccapx_to_pack['eapol_len'] = excpkt_ap['eapol_len']
+						hccapx_to_pack['eapol'] = excpkt_ap['eapol']
+					hccapx_to_pack['essid'] = struct.unpack('=32B', hccapx_to_pack['essid'])
+					hccapx_to_pack['eapol'] = struct.unpack('=256B', hccapx_to_pack['eapol'])
+					if BIG_ENDIAN_HOST:
+						hccapx_to_pack['signature']  = byte_swap_32(hccapx_to_pack['signature'])
+						hccapx_to_pack['version']    = byte_swap_32(hccapx_to_pack['version'])
+						hccapx_to_pack['eapol_len']  = byte_swap_16(hccapx_to_pack['eapol_len'])
+					if export == "hccapx":
+						hccapx = struct.pack('=IIBB32BB16B6B32B6B32BH256B',	\
+							hccapx_to_pack['signature'], \
+							hccapx_to_pack['version'], \
+							hccapx_to_pack['message_pair'], \
+							hccapx_to_pack['essid_len'], \
+							*hccapx_to_pack['essid'], \
+							hccapx_to_pack['keyver'], \
+							*hccapx_to_pack['keymic'], \
+							*hccapx_to_pack['mac_ap'], \
+							*hccapx_to_pack['nonce_ap'], \
+							*hccapx_to_pack['mac_sta'], \
+							*hccapx_to_pack['nonce_sta'], \
+							hccapx_to_pack['eapol_len'], \
+							*hccapx_to_pack['eapol'] \
+						)
+						DB_hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
+					elif export == "hcwpax":
+						DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
+		if export == "hccapx":
+			DB_hccapx_groupby(group_by=group_by)
+	
+	# Generate tasks
+	task_list = []
+	for jq in range(0, len(DB.essids), MAX_WORK_PER_PROCESS):
+		task = Process(target=build_chunk, args=[dict(list(DB.essids.items())[jq:jq+MAX_WORK_PER_PROCESS]), DB_hcwpaxs_add_list, DB_hccapx_add_list, DB_hccapx_groupby_list])
+		task_list.append(task)
+	for task in task_list:
+		task.start()
+	for task in task_list:
+		task.join()
+
+	# For each returned DB operation request, perform that operation
+	for DB_hcwpaxs_add in DB_hcwpaxs_add_list:
+		DB.hcwpaxs_add(**DB_hcwpaxs_add)
+	for DB_hccapx_add in DB_hccapx_add_list:
+		DB.hccapx_add(**DB_hccapx_add)
+	for DB_hccapx_groupby in DB_hccapx_groupby_list:
+		DB.hccapx_groupby(**DB_hccapx_groupby)
 
 ######################### MAIN #########################
 
@@ -1459,7 +1499,6 @@ def main():
 
 			xprint("Networks detected: {}".format(len(DB.essids)))
 			build(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by)
-
 			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
 				xprint("\nOutput files:")
