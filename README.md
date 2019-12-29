@@ -1,10 +1,11 @@
-# cap2hccapx.py
-Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file (re)written in Python ([c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
+# multicapconverter.py
+Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/multicapconverter.c))
 ```
-usage: cap2hccapx.py [-h] --input capture.cap --export {hcwpax,hccapx}
-                     [--output capture.hccapx] [--all]
-                     [--filter-by filter-by filter]
-                     [--group-by {none,bssid,essid,handshake}] [--quiet]
+usage: multicapconverter.py --input capture.cap --export {hcwpax,hccapx}
+                            [--output capture.hcwpax] [--all]
+                            [--filter-by filter-by filter]
+                            [--group-by {none,bssid,essid,handshake}]
+                            [--quiet] [--version] [--help]
 
 Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file
 
@@ -14,14 +15,15 @@ required arguments:
   --export {hcwpax,hccapx}, -x {hcwpax,hccapx}
 
 optional arguments:
-  -h, --help            show this help message and exit
-  --output capture.hccapx, -o capture.hccapx
-                        Output hccapx file
+  --output capture.hcwpax, -o capture.hcwpax
+                        Output file
   --all, -a             Export all handshakes even unauthenticated ones
   --filter-by filter-by filter, -f filter-by filter
                         --filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}
   --group-by {none,bssid,essid,handshake}, -g {none,bssid,essid,handshake}
   --quiet, -q           Enable quiet mode (print only output files/data)
+  --version, -v         show program's version number and exit
+  --help, -h            show this help message and exit
 ```
 
 ## Features
@@ -51,7 +53,7 @@ Also the original c version export all the handshakes even if they are not authe
 
 #### 1) Extract each handshake into a separated file (Auth Only)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by handshake -x hccapx
+python3 multicapconverter.py -i capture.cap --group-by handshake -x hccapx
 ...
 Output files:
 00-00-00-00-AA-AA_0.hccapx // 2
@@ -60,7 +62,7 @@ Output files:
 ```
 #### 2) Extract each handshake into a separated file (All)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by handshake -x hccapx --all
+python3 multicapconverter.py -i capture.cap --group-by handshake -x hccapx --all
 ...
 Output files:
 00-00-00-00-AA-AA_0.hccapx // 1
@@ -70,14 +72,14 @@ Output files:
 ```
 #### 3) Extract all handshakes into one file (just like the old c version)
 ```
-python3 cap2hccapx.py -i capture.cap --group-by none -x hccapx --all
+python3 multicapconverter.py -i capture.cap --group-by none -x hccapx --all
 ...
 Output files:
 capture.hccapx // 1, 2, 3 and 4
 ```
 #### 4) Extract handshakes based on BSSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by bssid -x hccapx --all
+python3 multicapconverter.py -i capture.cap --group-by bssid -x hccapx --all
 ...
 Output files:
 00-00-00-00-AA-AA.hccapx // 1 and 2
@@ -86,7 +88,7 @@ Output files:
 ```
 #### 5) Extract handshakes based on ESSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by essid -x hccapx --all
+python3 multicapconverter.py -i capture.cap --group-by essid -x hccapx --all
 ...
 Output files:
 Wifi.hccapx // 1, 2 and 4
@@ -94,7 +96,7 @@ Internet.hccapx // 3
 ```
 #### 6) Extract handshakes based on ESSID having a specific BSSID
 ```
-python3 cap2hccapx.py -i capture.cap --group-by essid --filter-by bssid 00:00:00:00:CC:CC -x hccapx --all
+python3 multicapconverter.py -i capture.cap --group-by essid --filter-by bssid 00:00:00:00:CC:CC -x hccapx --all
 ...
 Output files:
 Wifi.hccapx // 4
@@ -102,6 +104,9 @@ Wifi.hccapx // 4
 ## Notes
  - --group-by does not effect hcwpax (WPA\*01 & WPA\*02) output
  - --all does not effect hcwpax (WPA\*01) output
+
+## TIPS
+ - use --quiet for better performance
 
 ## TODO
  - Enhance performance and the way the script deals with structures
