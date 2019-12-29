@@ -1,5 +1,5 @@
 # multicapconverter.py
-Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/multicapconverter.c))
+Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
 ```
 usage: multicapconverter.py --input capture.cap --export {hcwpax,hccapx}
                             [--output capture.hcwpax] [--all]
