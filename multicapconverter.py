@@ -1659,7 +1659,7 @@ def main():
 #########################
 
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser(description='Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file', add_help=False)
+	parser = argparse.ArgumentParser(description='Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hcpmkid file', add_help=False)
 	required = parser.add_argument_group('required arguments')
 	optional = parser.add_argument_group('optional arguments')
 	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
