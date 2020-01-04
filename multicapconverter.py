@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -429,6 +429,10 @@ class hcwpaxs(dict):
 	def __setitem__(self, key, value):
 		if key not in self:
 			dict.__setitem__(self, key, value)
+class hcpmkids(dict):
+	def __setitem__(self, key, value):
+		if key not in self:
+			dict.__setitem__(self, key, value)
 class pmkids(dict):
 	def __setitem__(self, key, value):
 		if key not in self:
@@ -449,6 +453,7 @@ class Database(object):
 		self.excpkts = excpkts()
 		self.hccapxs = hccapxs()
 		self.hcwpaxs = hcwpaxs()
+		self.hcpmkids = hcpmkids()
 		self.pmkids = pmkids()
 		self.pcapng_info = pcapng_info()
 	def essid_add(self, bssid, essid, essid_len, essid_source):
@@ -528,6 +533,14 @@ class Database(object):
 				'eapol': bytes(eapol).hex(), \
 				'message_pair': '{:02x}'.format(message_pair) \
 			})
+	def hcpmkid_add(self, pmkid, mac_ap, mac_sta, essid):
+		key = pmkid
+		self.hcpmkids.__setitem__(key, { \
+			'pmkid': pmkid, \
+			'mac_ap': bytes(mac_ap).hex(), \
+			'mac_sta': bytes(mac_sta).hex(), \
+			'essid': bytes(essid).hex() \
+		})
 	def pmkid_add(self, mac_ap, mac_sta, pmkid):
 		key = hash(mac_ap+mac_sta)
 		self.pmkids.__setitem__(key, {
@@ -1304,6 +1317,7 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 	DB_hcwpaxs_add_list = manager.list()
 	DB_hccapx_add_list = manager.list()
 	DB_hccapx_groupby_list = manager.list()
+	DB_hcpmkid_add_list = manager.list()
 
 	# Helper functions to store each DB req to the right list
 	def DB_hcwpaxs_add(**kwords):
@@ -1314,6 +1328,8 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 		if DB_hccapx_groupby_list:
 			return
 		DB_hccapx_groupby_list.append(kwords)
+	def DB_hcpmkid_add(**kwords):
+		DB_hcpmkid_add_list.append(kwords)
 
 	# The work (building)
 	def build_chunk(essid_list, DB_hcwpaxs_add_list, DB_hccapx_add_list, DB_hccapx_groupby_list):
@@ -1353,6 +1369,16 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 									pmkid['pmkid'] \
 								))
 								break
+						elif export == "hcpmkid":
+							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
+							if pmkid:
+								DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+								mac_sta = bytes(excpkt_ap['mac_sta']).hex()
+								xprint(' --> STA={} [PMKID {}]'.format( \
+									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+									pmkid['pmkid'] \
+								))
+							break
 						#############
 						excpkts_AP_STA_sta = excpkts_AP_STA_.get('sta')
 						if not excpkts_AP_STA_sta:
@@ -1523,6 +1549,8 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 		DB.hccapx_add(**DB_hccapx_add)
 	if DB_hccapx_groupby_list:
 		DB.hccapx_groupby(**DB_hccapx_groupby_list[0])
+	for DB_hcpmkid_add in DB_hcpmkid_add_list:
+		DB.hcpmkid_add(**DB_hcpmkid_add)
 
 ######################### MAIN #########################
 
@@ -1597,6 +1625,31 @@ def main():
 					for hcwpax in DB.hcwpaxs.values():
 						hcwpax_line = '*'.join(hcwpax.values())
 						print(hcwpax_line)
+			elif args.export == "hcpmkid" and len(DB.hcpmkids):
+				if args.output:
+					written = 0
+					xprint("\nOutput hcpmkid files:")
+					hcpmkid_filename = args.output
+					print(hcpmkid_filename)
+					hcpmkid_file = open(args.output, 'w')
+					for hcpmkid in DB.hcpmkids.values():
+						hcpmkid_line = '*'.join(hcpmkid.values())
+						hcpmkid_file.write(hcpmkid_line+"\n")
+						written += 1
+					hcpmkid_file.close()
+					if written:
+						xprint("\nWritten {} WPA Handshakes to 1 files".format(written), end='')
+				else:
+					xprint("\nhcPMKID:")
+					for hcpmkid in DB.hcpmkids.values():
+						hcpmkid_line = '*'.join(hcpmkid.values())
+						print(hcpmkid_line)
+			else:
+				xprint("\nNothing exported. You may want to: "+ \
+					("\n- Try a different export format (-x/--export)")+ \
+					("\n- Use -a/--all to export unauthenticated handshakes" if not args.all else "")+ \
+					("\n- Remove the filter (-f/--filter-by)" if args.filter_by != [None, None] else "") \
+				)
 			xprint()
 	else:
 		xprint(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input))
@@ -1610,7 +1663,7 @@ if __name__ == '__main__':
 	required = parser.add_argument_group('required arguments')
 	optional = parser.add_argument_group('optional arguments')
 	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
-	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx'], required=True)
+	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hcpmkid'], required=True)
 	optional.add_argument("--output", "-o", help="Output file", metavar="capture.hcwpax")
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])

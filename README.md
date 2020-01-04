@@ -1,9 +1,9 @@
 # multicapconverter.py
 Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
 ```
-usage: multicapconverter.py --input capture.cap --export {hcwpax,hccapx}
-                            [--output capture.hcwpax] [--all]
-                            [--filter-by filter-by filter]
+usage: multicapconverter.py --input capture.cap --export
+                            {hcwpax,hccapx,hcpmkid} [--output capture.hcwpax]
+                            [--all] [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
                             [--quiet] [--version] [--help]
 
@@ -12,7 +12,7 @@ Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx file
 required arguments:
   --input capture.cap, -i capture.cap
                         Input capture file
-  --export {hcwpax,hccapx}, -x {hcwpax,hccapx}
+  --export {hcwpax,hccapx,hcpmkid}, -x {hcwpax,hccapx,hcpmkid}
 
 optional arguments:
   --output capture.hcwpax, -o capture.hcwpax
@@ -31,6 +31,7 @@ optional arguments:
 - Supports combined cap/pcap/pcapng files
 - Supports gz compressed cap/pcap/pcapng files
 - Export as hccapx (hashcat mode = 2500)
+- Export as hcpmkid (hashcat mode = 16800)
 - Export as hcwpax (hashcat mode = 22000)
 - Export only authenticated handshakes or all handshakes
 - Output files can be filtered/grouped
@@ -102,8 +103,8 @@ Output files:
 Wifi.hccapx // 4
 ```
 ## Notes
- - --group-by does not effect hcwpax (WPA\*01 & WPA\*02) output
- - --all does not effect hcwpax (WPA\*01) output
+ - --group-by does not effect hcwpax (WPA\*01 & WPA\*02) and hcpmkid output
+ - --all does not effect hcwpax (WPA\*01) and hcpmkid output
 
 ## TIPS
  - use --quiet for better performance
