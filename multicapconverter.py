@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -1309,34 +1309,44 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 
 ######################### OUTPUT #########################
 
-def build(export, export_unauthenticated=False, filters=None, group_by=None):
-	# Workers Manager
-	manager = Manager()
+def __xbuild__(Builder, DB, essid_list):
+	"""
+	Takes 3 arguments:
+	Builder: Our Builder object (from class Builder)
+	DB: Global DB to read Database contents (for Linux this is not required, but for Windows it is)
+	essid_list: a list of essids that a single worker is conserned with
+	"""
+	Builder.__build__(DB, essid_list)
 
-	# Lists were we store requested DB operations from our workers
-	DB_hcwpaxs_add_list = manager.list()
-	DB_hccapx_add_list = manager.list()
-	DB_hccapx_groupby_list = manager.list()
-	DB_hcpmkid_add_list = manager.list()
+class Builder(object):
+	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None):
+		super(Builder, self).__init__()
+		self.export = export
+		self.export_unauthenticated = export_unauthenticated
+		self.filters = filters
+		self.group_by = group_by
+		# Workers Manager
+		manager = Manager()
+		# Lists were we store requested DB operations from our workers
+		self.DB_hcwpaxs_add_list = manager.list()
+		self.DB_hccapx_add_list = manager.list()
+		self.DB_hccapx_groupby_list = manager.list()
+		self.DB_hcpmkid_add_list = manager.list()
 
 	# Helper functions to store each DB req to the right list
-	def DB_hcwpaxs_add(**kwords):
-		DB_hcwpaxs_add_list.append(kwords)
-	def DB_hccapx_add(**kwords):
-		DB_hccapx_add_list.append(kwords)
-	def DB_hccapx_groupby(**kwords):
-		if DB_hccapx_groupby_list:
+	def DB_hcwpaxs_add(self, **kwords):
+		self.DB_hcwpaxs_add_list.append(kwords)
+	def DB_hccapx_add(self, **kwords):
+		self.DB_hccapx_add_list.append(kwords)
+	def DB_hccapx_groupby(self, **kwords):
+		if self.DB_hccapx_groupby_list:
 			return
-		DB_hccapx_groupby_list.append(kwords)
-	def DB_hcpmkid_add(**kwords):
-		DB_hcpmkid_add_list.append(kwords)
+		self.DB_hccapx_groupby_list.append(kwords)
+	def DB_hcpmkid_add(self, **kwords):
+		self.DB_hcpmkid_add_list.append(kwords)
 
 	# The work (building)
-	def build_chunk(essid_list, DB_hcwpaxs_add_list, DB_hccapx_add_list, DB_hccapx_groupby_list):
-		nonlocal export
-		nonlocal export_unauthenticated
-		nonlocal filters
-		nonlocal group_by
+	def __build__(self, DB, essid_list):
 		for essid in essid_list.values():
 			bssid = bytes(essid['bssid']).hex()
 			essidf = essid['essid'].decode(encoding='utf-8', errors='ignore').rstrip('\x00')
@@ -1345,10 +1355,10 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 				bssidf, \
 				essidf, \
 				essid['essid_len'], \
-				' [Skipped]' if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid) else '' \
+				' [Skipped]' if (self.filters[0] == "essid" and self.filters[1] != essidf) or (self.filters[0] == "bssid" and self.filters[1] != bssid) else '' \
 			))
 			### FILTER ###
-			if (filters[0] == "essid" and filters[1] != essidf) or (filters[0] == "bssid" and filters[1] != bssid):
+			if (self.filters[0] == "essid" and self.filters[1] != essidf) or (self.filters[0] == "bssid" and self.filters[1] != bssid):
 				continue
 			##############
 			excpkts_AP_ = DB.excpkts.get(essid['bssid'])
@@ -1359,20 +1369,20 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 						continue
 					for excpkt_ap in excpkts_AP_STA_ap:
 						### PMKID ###
-						if export == "hcwpax":
+						if self.export == "hcwpax":
 							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
 							if pmkid:
-								DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 								mac_sta = bytes(excpkt_ap['mac_sta']).hex()
 								xprint(' --> STA={} [PMKID {}]'.format( \
 									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 									pmkid['pmkid'] \
 								))
 								break
-						elif export == "hcpmkid":
+						elif self.export == "hcpmkid":
 							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
 							if pmkid:
-								DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+								self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 								mac_sta = bytes(excpkt_ap['mac_sta']).hex()
 								xprint(' --> STA={} [PMKID {}]'.format( \
 									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
@@ -1473,10 +1483,10 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 										':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 										message_pair, \
 										excpkt_sta['replay_counter'], \
-										'' if export_unauthenticated else ' [Skipped]', \
+										'' if self.export_unauthenticated else ' [Skipped]', \
 										' (AP-LESS)' if ap_less else '' \
 									))
-									if not export_unauthenticated:
+									if not self.export_unauthenticated:
 										continue
 							else:
 								xprint(' --> STA={}, Message Pair={} [Skipped]'.format( \
@@ -1510,7 +1520,7 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 								hccapx_to_pack['signature']  = byte_swap_32(hccapx_to_pack['signature'])
 								hccapx_to_pack['version']    = byte_swap_32(hccapx_to_pack['version'])
 								hccapx_to_pack['eapol_len']  = byte_swap_16(hccapx_to_pack['eapol_len'])
-							if export == "hccapx":
+							if self.export == "hccapx":
 								hccapx = struct.pack('=IIBB32BB16B6B32B6B32BH256B',	\
 									hccapx_to_pack['signature'], \
 									hccapx_to_pack['version'], \
@@ -1526,31 +1536,42 @@ def build(export, export_unauthenticated=False, filters=None, group_by=None):
 									hccapx_to_pack['eapol_len'], \
 									*hccapx_to_pack['eapol'] \
 								)
-								DB_hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
-							elif export == "hcwpax":
-								DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
-		if export == "hccapx":
-			DB_hccapx_groupby(group_by=group_by)
-	
-	# Generate tasks
-	task_list = []
-	for jq in range(0, len(DB.essids), MAX_WORK_PER_PROCESS):
-		task = Process(target=build_chunk, args=[dict(list(DB.essids.items())[jq:jq+MAX_WORK_PER_PROCESS]), DB_hcwpaxs_add_list, DB_hccapx_add_list, DB_hccapx_groupby_list])
-		task_list.append(task)
-	for task in task_list:
-		task.start()
-	for task in task_list:
-		task.join()
+								self.DB_hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
+							elif self.export == "hcwpax":
+								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
+		if self.export == "hccapx":
+			self.DB_hccapx_groupby(group_by=self.group_by)
 
-	# For each returned DB operation request, perform that operation
-	for DB_hcwpaxs_add in DB_hcwpaxs_add_list:
-		DB.hcwpaxs_add(**DB_hcwpaxs_add)
-	for DB_hccapx_add in DB_hccapx_add_list:
-		DB.hccapx_add(**DB_hccapx_add)
-	if DB_hccapx_groupby_list:
-		DB.hccapx_groupby(**DB_hccapx_groupby_list[0])
-	for DB_hcpmkid_add in DB_hcpmkid_add_list:
-		DB.hcpmkid_add(**DB_hcpmkid_add)
+	def _pre_build(self):
+		pass
+
+	def _build(self):
+		# Generate tasks
+		task_list = []
+		for jq in range(0, len(DB.essids), MAX_WORK_PER_PROCESS):
+			task = Process(target=__xbuild__, args=[self, DB, dict(list(DB.essids.items())[jq:jq+MAX_WORK_PER_PROCESS])])
+			task_list.append(task)
+		for task in task_list:
+			task.start()
+		for task in task_list:
+			task.join()
+		# For each returned DB operation request, perform that operation
+		for DB_hcwpaxs_add in self.DB_hcwpaxs_add_list:
+			DB.hcwpaxs_add(**DB_hcwpaxs_add)
+		for DB_hccapx_add in self.DB_hccapx_add_list:
+			DB.hccapx_add(**DB_hccapx_add)
+		if self.DB_hccapx_groupby_list:
+			DB.hccapx_groupby(**self.DB_hccapx_groupby_list[0])
+		for DB_hcpmkid_add in self.DB_hcpmkid_add_list:
+			DB.hcpmkid_add(**DB_hcpmkid_add)
+
+	def _post_build(self):
+		pass
+
+	def build(self):
+		self._pre_build()
+		self._build()
+		self._post_build()
 
 ######################### MAIN #########################
 
@@ -1587,7 +1608,7 @@ def main():
 				exit()
 
 			xprint("Networks detected: {}".format(len(DB.essids)))
-			build(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by)
+			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by).build()
 			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
 				xprint("\nOutput hccapx files:")
