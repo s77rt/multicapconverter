@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -613,6 +613,8 @@ def get_pmkid_from_packet(packet, source):
 				except:
 					break
 		return
+	elif source == "EAPOL-M2":
+		pos = 0
 	elif source == IEEE80211_STYPE_ASSOC_REQ:
 		pos = 28
 	elif source == IEEE80211_STYPE_REASSOC_REQ:
@@ -636,7 +638,7 @@ def get_pmkid_from_packet(packet, source):
 				#for i in range(0, tag_pairwise_suite_count):
 				#	pos += (4*i)+4
 				#	tag_pairwise_suite.append(tag_data[pos-4:pos])
-				pos += (4*tag_pairwise_suite_count)+4
+				pos += 4*tag_pairwise_suite_count
 				# AKM Suite
 				tag_authentication_suite_count = struct.unpack('=H', tag_data[pos:pos+2])[0]
 				if BIG_ENDIAN_HOST:
@@ -1037,11 +1039,14 @@ def process_packet(packet, header):
 			return
 		if excpkt['excpkt_num'] == EXC_PKT_NUM_1 or excpkt['excpkt_num'] == EXC_PKT_NUM_3:
 			DB.excpkt_add(excpkt_num=excpkt['excpkt_num'], tv_sec=header['tv_sec'], tv_usec=header['tv_usec'], replay_counter=excpkt['replay_counter'], mac_ap=ieee80211_hdr_3addr['addr2'], mac_sta=ieee80211_hdr_3addr['addr1'], nonce=excpkt['nonce'], eapol_len=excpkt['eapol_len'], eapol=excpkt['eapol'], keyver=excpkt['keyver'], keymic=excpkt['keymic'])
-			if excpkt['excpkt_num'] == EXC_PKT_NUM_1 and byte_swap_16(auth_packet['key_information']) == 0x008a:
+			if excpkt['excpkt_num'] == EXC_PKT_NUM_1 and bin(byte_swap_16(auth_packet['key_information']))[-3:] == '010': # .... .... .... .010 = Key Descriptor Version: AES Cipher, HMAC-SHA1 MIC (2)
 				for pmkid in get_pmkid_from_packet(rest_packet, "EAPOL-M1"):
 					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr2'], mac_sta=ieee80211_hdr_3addr['addr1'], pmkid=pmkid)
 		elif excpkt['excpkt_num'] == EXC_PKT_NUM_2 or excpkt['excpkt_num'] == EXC_PKT_NUM_4:
 			DB.excpkt_add(excpkt_num=excpkt['excpkt_num'], tv_sec=header['tv_sec'], tv_usec=header['tv_usec'], replay_counter=excpkt['replay_counter'], mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], nonce=excpkt['nonce'], eapol_len=excpkt['eapol_len'], eapol=excpkt['eapol'], keyver=excpkt['keyver'], keymic=excpkt['keymic'])
+			if excpkt['excpkt_num'] == EXC_PKT_NUM_2 and bin(byte_swap_16(auth_packet['key_information']))[-3:] == '010': # .... .... .... .010 = Key Descriptor Version: AES Cipher, HMAC-SHA1 MIC (2)
+				for pmkid in get_pmkid_from_packet(rest_packet, "EAPOL-M2"):
+					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], pmkid=pmkid)
 
 ######################### READ PACKETS #########################
 

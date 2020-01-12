@@ -2,6 +2,13 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.3] - 12/01/2020
+### Fixed
+- Some PMKIDs in (RE)ASSOC_REQ where not being extracted properly
+
+### Added
+- Extract PMKIDs from EAPOL-M2
+
 ## [0.1.2] - 08/01/2020
 ### Fixed
 - Windows multiprocessing compatibility issue(s)
