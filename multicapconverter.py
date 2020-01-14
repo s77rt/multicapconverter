@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -476,7 +476,7 @@ class Database(object):
 		subsubkey = 'ap' if excpkt_num in [EXC_PKT_NUM_1, EXC_PKT_NUM_3] else 'sta'
 		check = self.excpkts.get(key, {}).get(subkey, {}).get(subsubkey, {})
 		for c in check:
-			if c['eapol'] == eapol:
+			if c['eapol'] == eapol or (c['nonce'] == nonce and c['keymic'] == keymic):
 				return
 		self.excpkts.__setitem__(key, {subkey: {subsubkey: [{
 			'excpkt_num': excpkt_num,
@@ -513,8 +513,8 @@ class Database(object):
 				'signature': signature, \
 				'type': ftype, \
 				'pmkid_or_mic': pmkid_or_mic, \
-				'mac_ap': bytes(mac_ap).hex(), \
-				'mac_sta': bytes(mac_sta).hex(), \
+				'mac_ap': mac_ap, \
+				'mac_sta': mac_sta, \
 				'essid': bytes(essid).hex(), \
 				'anonce': '', \
 				'eapol': '', \
@@ -537,8 +537,8 @@ class Database(object):
 		key = pmkid
 		self.hcpmkids.__setitem__(key, { \
 			'pmkid': pmkid, \
-			'mac_ap': bytes(mac_ap).hex(), \
-			'mac_sta': bytes(mac_sta).hex(), \
+			'mac_ap': mac_ap, \
+			'mac_sta': mac_sta, \
 			'essid': bytes(essid).hex() \
 		})
 	def pmkid_add(self, mac_ap, mac_sta, pmkid):
@@ -651,6 +651,7 @@ def get_pmkid_from_packet(packet, source):
 					akm = tag_data[pos-4:pos]
 					if akm[0:3] != bytes(SUITE_OUI) or akm[3] not in [AK_PSK, AK_PSKSHA256]:
 						skip = 1
+						break
 				if skip == 1:
 					break
 				###############
@@ -669,6 +670,7 @@ def get_pmkid_from_packet(packet, source):
 				except:
 					break
 				##############################
+				break
 			pos = pos+2+tag_len
 		except:
 			break
@@ -1324,12 +1326,13 @@ def __xbuild__(Builder, DB, essid_list):
 	Builder.__build__(DB, essid_list)
 
 class Builder(object):
-	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None):
+	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None, do_not_clean=False):
 		super(Builder, self).__init__()
 		self.export = export
 		self.export_unauthenticated = export_unauthenticated
 		self.filters = filters
 		self.group_by = group_by
+		self.do_not_clean = do_not_clean
 		# Workers Manager
 		manager = Manager()
 		# Lists were we store requested DB operations from our workers
@@ -1367,33 +1370,18 @@ class Builder(object):
 				continue
 			##############
 			excpkts_AP_ = DB.excpkts.get(essid['bssid'])
-			if excpkts_AP_:
+			if excpkts_AP_ and self.export != "hcpmkid":
 				for excpkts_AP_STA_ in excpkts_AP_.values():
 					excpkts_AP_STA_ap = excpkts_AP_STA_.get('ap')
 					if not excpkts_AP_STA_ap:
 						continue
 					for excpkt_ap in excpkts_AP_STA_ap:
-						### PMKID ###
-						if self.export == "hcwpax":
+						### CLEAN ###
+						# SKIP EAPOL IF WE HAVE PMKID (HCWPAX ONLY)
+						if self.export == "hcwpax" and not self.do_not_clean:
 							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
 							if pmkid:
-								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
-								mac_sta = bytes(excpkt_ap['mac_sta']).hex()
-								xprint(' --> STA={} [PMKID {}]'.format( \
-									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-									pmkid['pmkid'] \
-								))
 								break
-						elif self.export == "hcpmkid":
-							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
-							if pmkid:
-								self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=excpkt_ap['mac_ap'], mac_sta=excpkt_ap['mac_sta'], essid=essid['essid'][:essid['essid_len']])
-								mac_sta = bytes(excpkt_ap['mac_sta']).hex()
-								xprint(' --> STA={} [PMKID {}]'.format( \
-									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-									pmkid['pmkid'] \
-								))
-							break
 						#############
 						excpkts_AP_STA_sta = excpkts_AP_STA_.get('sta')
 						if not excpkts_AP_STA_sta:
@@ -1544,6 +1532,26 @@ class Builder(object):
 								self.DB_hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
 							elif self.export == "hcwpax":
 								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
+			### PMKID ###
+			if self.export == "hcwpax":
+				for pmkid in DB.pmkids.values():
+					if pmkid['mac_ap'] == bssid:
+						self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+						mac_sta = pmkid['mac_sta']
+						xprint(' --> STA={} [PMKID {}]'.format( \
+							':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+							pmkid['pmkid'] \
+						))
+			elif self.export == "hcpmkid":
+				for pmkid in DB.pmkids.values():
+					if pmkid['mac_ap'] == bssid:
+						self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
+						mac_sta = pmkid['mac_sta']
+						xprint(' --> STA={} [PMKID {}]'.format( \
+							':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+							pmkid['pmkid'] \
+						))
+			#############
 		if self.export == "hccapx":
 			self.DB_hccapx_groupby(group_by=self.group_by)
 
@@ -1613,7 +1621,7 @@ def main():
 				exit()
 
 			xprint("Networks detected: {}".format(len(DB.essids)))
-			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by).build()
+			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean).build()
 			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
 				xprint("\nOutput hccapx files:")
@@ -1694,6 +1702,7 @@ if __name__ == '__main__':
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
+	optional.add_argument("--do-not-clean", help="Do not clean output", action="store_true")
 	optional.add_argument("--quiet", "-q", help="Enable quiet mode (print only output files/data)", action="store_true")
 	optional.add_argument("--version", "-v", action='version', version=__version__)
 	optional.add_argument("--help", "-h", action='help', default=argparse.SUPPRESS,	help='show this help message and exit')
