@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -541,12 +541,13 @@ class Database(object):
 			'mac_sta': mac_sta, \
 			'essid': bytes(essid).hex() \
 		})
-	def pmkid_add(self, mac_ap, mac_sta, pmkid):
+	def pmkid_add(self, mac_ap, mac_sta, pmkid, akm):
 		key = hash(mac_ap+mac_sta)
 		self.pmkids.__setitem__(key, {
 			'mac_ap': bytes(mac_ap).hex(),
 			'mac_sta': bytes(mac_sta).hex(),
-			'pmkid': pmkid
+			'pmkid': pmkid,
+			'akm': akm
 		})
 	def pcapng_info_add(self, key, info):
 		self.pcapng_info.__setitem__(key, info)
@@ -597,6 +598,7 @@ def get_essid_from_tag(packet, header, length_skip):
 
 def get_pmkid_from_packet(packet, source):
 	if source == "EAPOL-M1":
+		akm = None # Unknown AKM
 		if packet:
 			pos = 0
 			while True:
@@ -608,7 +610,7 @@ def get_pmkid_from_packet(packet, source):
 						if tag_data[0:3] == bytes(SUITE_OUI):
 							pmkid = tag_data[4:].hex()
 							if pmkid != '0'*32:
-								yield pmkid
+								yield pmkid, akm
 					pos = pos+2+tag_len
 				except:
 					break
@@ -649,7 +651,7 @@ def get_pmkid_from_packet(packet, source):
 				for i in range(0, tag_authentication_suite_count):
 					pos += (4*i)+4
 					akm = tag_data[pos-4:pos]
-					if akm[0:3] != bytes(SUITE_OUI) or akm[3] not in [AK_PSK, AK_PSKSHA256]:
+					if akm[0:3] != bytes(SUITE_OUI):
 						skip = 1
 						break
 				if skip == 1:
@@ -666,7 +668,7 @@ def get_pmkid_from_packet(packet, source):
 						pos += (16*i)+16
 						pmkid = tag_data[pos-16:pos].hex()
 						if pmkid != '0'*32:
-							yield pmkid
+							yield pmkid, akm[3]
 				except:
 					break
 				##############################
@@ -947,8 +949,8 @@ def process_packet(packet, header):
 				mac_sta = ieee80211_hdr_3addr['addr2']
 			else:
 				mac_sta = ieee80211_hdr_3addr['addr1']
-			for pmkid in get_pmkid_from_packet(packet, stype):
-				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid)
+			for pmkid, akm in get_pmkid_from_packet(packet, stype):
+				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid, akm=akm)
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_assocreq_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
@@ -960,8 +962,8 @@ def process_packet(packet, header):
 				mac_sta = ieee80211_hdr_3addr['addr2']
 			else:
 				mac_sta = ieee80211_hdr_3addr['addr1']
-			for pmkid in get_pmkid_from_packet(packet, stype):
-				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid)
+			for pmkid, akm in get_pmkid_from_packet(packet, stype):
+				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid, akm=akm)
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_reassocreq_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
@@ -1041,14 +1043,14 @@ def process_packet(packet, header):
 			return
 		if excpkt['excpkt_num'] == EXC_PKT_NUM_1 or excpkt['excpkt_num'] == EXC_PKT_NUM_3:
 			DB.excpkt_add(excpkt_num=excpkt['excpkt_num'], tv_sec=header['tv_sec'], tv_usec=header['tv_usec'], replay_counter=excpkt['replay_counter'], mac_ap=ieee80211_hdr_3addr['addr2'], mac_sta=ieee80211_hdr_3addr['addr1'], nonce=excpkt['nonce'], eapol_len=excpkt['eapol_len'], eapol=excpkt['eapol'], keyver=excpkt['keyver'], keymic=excpkt['keymic'])
-			if excpkt['excpkt_num'] == EXC_PKT_NUM_1 and bin(byte_swap_16(auth_packet['key_information']))[-3:] == '010': # .... .... .... .010 = Key Descriptor Version: AES Cipher, HMAC-SHA1 MIC (2)
-				for pmkid in get_pmkid_from_packet(rest_packet, "EAPOL-M1"):
-					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr2'], mac_sta=ieee80211_hdr_3addr['addr1'], pmkid=pmkid)
+			if excpkt['excpkt_num'] == EXC_PKT_NUM_1:
+				for pmkid, akm in get_pmkid_from_packet(rest_packet, "EAPOL-M1"):
+					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr2'], mac_sta=ieee80211_hdr_3addr['addr1'], pmkid=pmkid, akm=akm)
 		elif excpkt['excpkt_num'] == EXC_PKT_NUM_2 or excpkt['excpkt_num'] == EXC_PKT_NUM_4:
 			DB.excpkt_add(excpkt_num=excpkt['excpkt_num'], tv_sec=header['tv_sec'], tv_usec=header['tv_usec'], replay_counter=excpkt['replay_counter'], mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], nonce=excpkt['nonce'], eapol_len=excpkt['eapol_len'], eapol=excpkt['eapol'], keyver=excpkt['keyver'], keymic=excpkt['keymic'])
-			if excpkt['excpkt_num'] == EXC_PKT_NUM_2 and bin(byte_swap_16(auth_packet['key_information']))[-3:] == '010': # .... .... .... .010 = Key Descriptor Version: AES Cipher, HMAC-SHA1 MIC (2)
-				for pmkid in get_pmkid_from_packet(rest_packet, "EAPOL-M2"):
-					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], pmkid=pmkid)
+			if excpkt['excpkt_num'] == EXC_PKT_NUM_2:
+				for pmkid, akm in get_pmkid_from_packet(rest_packet, "EAPOL-M2"):
+					DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], pmkid=pmkid, akm=akm)
 
 ######################### READ PACKETS #########################
 
@@ -1326,13 +1328,14 @@ def __xbuild__(Builder, DB, essid_list):
 	Builder.__build__(DB, essid_list)
 
 class Builder(object):
-	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None, do_not_clean=False):
+	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None, do_not_clean=False, ignore_ie=False):
 		super(Builder, self).__init__()
 		self.export = export
 		self.export_unauthenticated = export_unauthenticated
 		self.filters = filters
 		self.group_by = group_by
 		self.do_not_clean = do_not_clean
+		self.ignore_ie = ignore_ie
 		# Workers Manager
 		manager = Manager()
 		# Lists were we store requested DB operations from our workers
@@ -1381,7 +1384,8 @@ class Builder(object):
 						if self.export == "hcwpax" and not self.do_not_clean:
 							pmkid = DB.pmkids.get(hash(excpkt_ap['mac_ap']+excpkt_ap['mac_sta']))
 							if pmkid:
-								break
+								if self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256]:
+									break
 						#############
 						excpkts_AP_STA_sta = excpkts_AP_STA_.get('sta')
 						if not excpkts_AP_STA_sta:
@@ -1535,7 +1539,7 @@ class Builder(object):
 			### PMKID ###
 			if self.export == "hcwpax":
 				for pmkid in DB.pmkids.values():
-					if pmkid['mac_ap'] == bssid:
+					if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256]):
 						self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 						mac_sta = pmkid['mac_sta']
 						xprint(' --> STA={} [PMKID {}]'.format( \
@@ -1544,7 +1548,7 @@ class Builder(object):
 						))
 			elif self.export == "hcpmkid":
 				for pmkid in DB.pmkids.values():
-					if pmkid['mac_ap'] == bssid:
+					if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256]):
 						self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 						mac_sta = pmkid['mac_sta']
 						xprint(' --> STA={} [PMKID {}]'.format( \
@@ -1621,7 +1625,7 @@ def main():
 				exit()
 
 			xprint("Networks detected: {}".format(len(DB.essids)))
-			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean).build()
+			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie).build()
 			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
 				xprint("\nOutput hccapx files:")
@@ -1682,6 +1686,7 @@ def main():
 				xprint("\nNothing exported. You may want to: "+ \
 					("\n- Try a different export format (-x/--export)")+ \
 					("\n- Use -a/--all to export unauthenticated handshakes" if not args.all else "")+ \
+					("\n- Use --ignore-ie to ignore ie (AKM Check) (Not Recommended)" if not args.ignore_ie else "")+ \
 					("\n- Remove the filter (-f/--filter-by)" if args.filter_by != [None, None] else "") \
 				)
 			xprint()
@@ -1703,6 +1708,7 @@ if __name__ == '__main__':
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
 	optional.add_argument("--do-not-clean", help="Do not clean output", action="store_true")
+	optional.add_argument("--ignore-ie", help="Ignore information element (AKM Check) (Not Recommended)", action="store_true")
 	optional.add_argument("--quiet", "-q", help="Enable quiet mode (print only output files/data)", action="store_true")
 	optional.add_argument("--version", "-v", action='version', version=__version__)
 	optional.add_argument("--help", "-h", action='help', default=argparse.SUPPRESS,	help='show this help message and exit')

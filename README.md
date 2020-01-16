@@ -5,7 +5,8 @@ usage: multicapconverter.py --input capture.cap --export
                             {hcwpax,hccapx,hcpmkid} [--output capture.hcwpax]
                             [--all] [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
-                            [--do-not-clean] [--quiet] [--version] [--help]
+                            [--do-not-clean] [--ignore-ie] [--quiet]
+                            [--version] [--help]
 
 Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hcpmkid
 file
@@ -23,6 +24,8 @@ optional arguments:
                         --filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}
   --group-by {none,bssid,essid,handshake}, -g {none,bssid,essid,handshake}
   --do-not-clean        Do not clean output
+  --ignore-ie           Ignore information element (AKM Check) (Not
+                        Recommended)
   --quiet, -q           Enable quiet mode (print only output files/data)
   --version, -v         show program's version number and exit
   --help, -h            show this help message and exit
@@ -108,6 +111,7 @@ Wifi.hccapx // 4
  - --group-by does not effect hcwpax (WPA\*01 & WPA\*02) and hcpmkid output
  - --all does not effect hcwpax (WPA\*01) and hcpmkid output
  - by default, if a capture have both WPA\*01 and WPA\*02 (hcwpax format), WPA\*02 will be ignored on the exportation process. If you want to export both, use --do-not-clean
+ - by default, multicapconverter does not export any pmkid from EAPOL-M1 due to the lack of AKM info. If you want to ignore AKM check, use --ignore-ie (Not Recommended)
 
 ## TIPS
  - use --quiet for better performance

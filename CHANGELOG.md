@@ -2,6 +2,14 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.5] - 16/01/2020
+### Changed
+- PMKIDs found in EAPOL-M1 won't be exported unless the user specify the --ignore-ie option
+
+### Added
+- --ignore-ie option
+
+
 ## [0.1.4] - 14/01/2020
 ### Fixed
 - PMKIDs were not being exported if the station that holds those pmkids have no other M1,M2,M3,M4 frames captured
