@@ -2,13 +2,19 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.6] - 18/01/2020
+### Fixed
+- Errors were not being reported
+
+### Added
+- --ignore-ts option (Ignore timestamps check)
+
 ## [0.1.5] - 16/01/2020
 ### Changed
 - PMKIDs found in EAPOL-M1 won't be exported unless the user specify the --ignore-ie option
 
 ### Added
-- --ignore-ie option
-
+- --ignore-ie option (Ignore information element (AKM Check))
 
 ## [0.1.4] - 14/01/2020
 ### Fixed

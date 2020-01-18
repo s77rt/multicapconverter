@@ -5,8 +5,8 @@ usage: multicapconverter.py --input capture.cap --export
                             {hcwpax,hccapx,hcpmkid} [--output capture.hcwpax]
                             [--all] [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
-                            [--do-not-clean] [--ignore-ie] [--quiet]
-                            [--version] [--help]
+                            [--do-not-clean] [--ignore-ie] [--ignore-ts]
+                            [--quiet] [--version] [--help]
 
 Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hcpmkid
 file
@@ -26,6 +26,7 @@ optional arguments:
   --do-not-clean        Do not clean output
   --ignore-ie           Ignore information element (AKM Check) (Not
                         Recommended)
+  --ignore-ts           Ignore timestamps check (Not Recommended)
   --quiet, -q           Enable quiet mode (print only output files/data)
   --version, -v         show program's version number and exit
   --help, -h            show this help message and exit
@@ -61,7 +62,7 @@ Also the original c version export all the handshakes even if they are not authe
 ```
 python3 multicapconverter.py -i capture.cap --group-by handshake -x hccapx
 ...
-Output files:
+Output hccapx files:
 00-00-00-00-AA-AA_0.hccapx // 2
 00-00-00-00-BB-BB_0.hccapx // 3
 00-00-00-00-CC-CC_0.hccapx // 4
@@ -70,7 +71,7 @@ Output files:
 ```
 python3 multicapconverter.py -i capture.cap --group-by handshake -x hccapx --all
 ...
-Output files:
+Output hccapx files:
 00-00-00-00-AA-AA_0.hccapx // 1
 00-00-00-00-AA-AA_1.hccapx // 2
 00-00-00-00-BB-BB_0.hccapx // 3
@@ -80,14 +81,14 @@ Output files:
 ```
 python3 multicapconverter.py -i capture.cap --group-by none -x hccapx --all
 ...
-Output files:
+Output hccapx files:
 capture.hccapx // 1, 2, 3 and 4
 ```
 #### 4) Extract handshakes based on BSSID
 ```
 python3 multicapconverter.py -i capture.cap --group-by bssid -x hccapx --all
 ...
-Output files:
+Output hccapx files:
 00-00-00-00-AA-AA.hccapx // 1 and 2
 00-00-00-00-BB-BB.hccapx // 3
 00-00-00-00-CC-CC.hccapx // 4
@@ -96,7 +97,7 @@ Output files:
 ```
 python3 multicapconverter.py -i capture.cap --group-by essid -x hccapx --all
 ...
-Output files:
+Output hccapx files:
 Wifi.hccapx // 1, 2 and 4
 Internet.hccapx // 3
 ```
@@ -104,7 +105,7 @@ Internet.hccapx // 3
 ```
 python3 multicapconverter.py -i capture.cap --group-by essid --filter-by bssid 00:00:00:00:CC:CC -x hccapx --all
 ...
-Output files:
+Output hccapx files:
 Wifi.hccapx // 4
 ```
 ## Notes
@@ -112,6 +113,7 @@ Wifi.hccapx // 4
  - --all does not effect hcwpax (WPA\*01) and hcpmkid output
  - by default, if a capture have both WPA\*01 and WPA\*02 (hcwpax format), WPA\*02 will be ignored on the exportation process. If you want to export both, use --do-not-clean
  - by default, multicapconverter does not export any pmkid from EAPOL-M1 due to the lack of AKM info. If you want to ignore AKM check, use --ignore-ie (Not Recommended)
+ - by default, multicapconverter ignore packets with zeroed timestamps. If you want to process such packets, use --ignore-ts (Not Recommended)
 
 ## TIPS
  - use --quiet for better performance

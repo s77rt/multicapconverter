@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -215,6 +215,13 @@ DB_EXCPKT_MAX = 100000
 MAX_WORK_PER_PROCESS = 100
 
 CHUNK_SIZE = 8192
+
+# Log Levels
+INFO = 10
+WARNING = 20
+ERROR = 30
+CRITICAL = 40
+DEBUG = 50
 ###
 
 ### Structures-Like ###
@@ -357,6 +364,39 @@ pcapng_general_block_structure = namedtuple( \
 ')
 ###
 
+### LOGGER ###
+class l_messages(dict):
+	def log(self, key, value=1):
+		"""
+		key => message
+		value => counter of message
+		"""
+		if key not in self:
+			dict.__setitem__(self, key, value)
+		else:
+			self[key] += value
+class Logger(object):
+	def __init__(self):
+		super(Logger, self).__init__()
+		self.info = l_messages()
+		self.warning = l_messages()
+		self.error = l_messages()
+		self.critical = l_messages()
+		self.debug = l_messages()
+	def log(self, message, level):
+		if level >= DEBUG:
+			self.debug.log(message)
+		elif level >= CRITICAL:
+			self.critical.log(message)
+		elif level >= ERROR:
+			self.error.log(message)
+		elif level >= WARNING:
+			self.warning.log(message)
+		else:
+			self.info.log(message)
+LOGGER = Logger()
+###
+
 ### H-Functions ###
 def byte_swap_16(n):
 	return (n & 0xff00) >> 8 \
@@ -385,6 +425,7 @@ def pymemcpy(src, count):
 	elif isinstance(dest, (list,tuple)):
 		dest += (0,)*(count - len(dest))
 	if len(dest) != count:
+		LOGGER.log('pymemcpy failed', ERROR)
 		raise ValueError('pymemcpy failed')
 	return dest
 #
@@ -458,6 +499,7 @@ class Database(object):
 		self.pcapng_info = pcapng_info()
 	def essid_add(self, bssid, essid, essid_len, essid_source):
 		if len(self.essids) == DB_ESSID_MAX:
+			LOGGER.log('DB_ESSID_MAX Exceeded!', CRITICAL)
 			raise ValueError('DB_ESSID_MAX Exceeded!')
 		if essid_len == 0 or not essid:
 			return
@@ -470,6 +512,7 @@ class Database(object):
 		})
 	def excpkt_add(self, excpkt_num, tv_sec, tv_usec, replay_counter, mac_ap, mac_sta, nonce, eapol_len, eapol, keyver, keymic):
 		if len(self.excpkts) == DB_EXCPKT_MAX:
+			LOGGER.log('DB_EXCPKT_MAX Exceeded!', CRITICAL)
 			raise ValueError('DB_EXCPKT_MAX Exceeded!')
 		key = pymemcpy(mac_ap, 6)
 		subkey = pymemcpy(mac_sta, 6)
@@ -820,6 +863,7 @@ def read_pcap_file_header(pcap):
 	try:
 		pcap_file_header =  dict(pcap_file_header_t._asdict(pcap_file_header_t._make(struct.unpack('=IHHIIII', pcap.read(SIZE_OF_pcap_file_header_t)))))
 	except struct.error:
+		LOGGER.log('Could not read pcap header', WARNING)
 		raise ValueError('Could not read pcap header')
 	if BIG_ENDIAN_HOST:
 		pcap_file_header['magic']          = byte_swap_32(pcap_file_header['magic'])
@@ -835,11 +879,13 @@ def read_pcap_file_header(pcap):
 		bitness = 1
 		xprint("WARNING Endianness(big) is not well tested!")
 	else:
+		LOGGER.log('Invalid pcap header', WARNING)
 		raise ValueError('Invalid pcap header')
 	if (pcap_file_header['linktype'] != DLT_IEEE802_11) \
 	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PRISM) \
 	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_RADIO) \
 	  and (pcap_file_header['linktype'] != DLT_IEEE802_11_PPI_HDR):
+		LOGGER.log('Unsupported linktype detected', WARNING)
 		raise ValueError('Unsupported linktype detected')
 	return pcap_file_header, bitness
 
@@ -1054,7 +1100,7 @@ def process_packet(packet, header):
 
 ######################### READ PACKETS #########################
 
-def read_pcap_packets(cap_file, pcap_file_header, bitness):
+def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -1101,7 +1147,10 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness):
 				header['len']      = byte_swap_32(header['len'])
 			if header['tv_sec'] == 0 and header['tv_usec'] == 0:
 				header_error = 'Zero value timestamps detected'
-				raise ValueError(header_error)
+				if not ignore_ts:
+					raise ValueError(header_error)
+				else:
+					LOGGER.log(header_error, WARNING)
 			if header['caplen'] >= TCPDUMP_DECODE_LEN or to_signed_32(header['caplen']) < 0:
 				header_error = 'Oversized packet detected'
 				raise ValueError(header_error)
@@ -1169,14 +1218,20 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness):
 			except:
 				packet_error = 'Could not read pcap packet data'
 				raise ValueError(packet_error)
-		except (ValueError, struct.error):
+		except ValueError as e:
+			LOGGER.log(str(e), WARNING)
+			continue
+		except struct.error:
 			continue
 		else:
 			try:
 				STATUS.step_packet()
 				STATUS.set_filepos(cap_file.tell())
 				process_packet(packet, header)
-			except (ValueError, struct.error):
+			except ValueError as e:
+				LOGGER.log(str(e), WARNING)
+				continue
+			except struct.error:
 				continue
 	if header_count == 0 or packet_count == 0:
 		if header_error:
@@ -1186,7 +1241,7 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness):
 		else:
 			raise ValueError('Something went wrong')
 
-def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol):
+def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, ignore_ts=False):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -1231,7 +1286,10 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 			header['tv_sec'], header['tv_usec'] = timestamp_high, timestamp_low
 			if header['tv_sec'] == 0 and header['tv_usec'] == 0:
 				header_error = 'Zero value timestamps detected'
-				raise ValueError(header_error)
+				if not ignore_ts:
+					raise ValueError(header_error)
+				else:
+					LOGGER.log(header_error, WARNING)
 			if header['caplen'] >= TCPDUMP_DECODE_LEN or to_signed_32(header['caplen']) < 0:
 				header_error = 'Oversized packet detected'
 				raise ValueError(header_error)
@@ -1299,14 +1357,20 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 			except:
 				packet_error = 'Could not read pcap packet data'
 				raise ValueError(packet_error)
-		except (ValueError, struct.error):
+		except ValueError as e:
+			LOGGER.log(str(e), WARNING)
+			continue
+		except struct.error:
 			continue
 		else:
 			try:
 				STATUS.step_packet()
 				STATUS.set_filepos(cap_file.tell())
 				process_packet(packet, header)
-			except (ValueError, struct.error):
+			except ValueError as e:
+				LOGGER.log(str(e), WARNING)
+				continue
+			except struct.error:
 				continue
 	if header_count == 0 or packet_count == 0:
 		if header_error:
@@ -1600,19 +1664,19 @@ def main():
 			if args.input.lower().endswith('.pcapng') or args.input.lower().endswith('.pcapng.gz'):
 				try:
 					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol)
+						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, args.ignore_ts)
 				except:
 					cap_file.seek(0)
 					pcap_file_header, bitness = read_pcap_file_header(cap_file)
-					read_pcap_packets(cap_file, pcap_file_header, bitness)
+					read_pcap_packets(cap_file, pcap_file_header, bitness, args.ignore_ts)
 			else:
 				try:
 					pcap_file_header, bitness = read_pcap_file_header(cap_file)
-					read_pcap_packets(cap_file, pcap_file_header, bitness)
+					read_pcap_packets(cap_file, pcap_file_header, bitness, args.ignore_ts)
 				except:
 					cap_file.seek(0)
 					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol)
+						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, args.ignore_ts)
 		except (ValueError, struct.error) as error:
 			xprint(str(error))
 			exit()
@@ -1621,10 +1685,22 @@ def main():
 			xprint(' '*77, end='\r')
 
 			if len(DB.essids) == 0:
-				xprint("No Networks found\n")
+				xprint("[!] No Networks found\n")
 				exit()
 
-			xprint("Networks detected: {}".format(len(DB.essids)))
+			xprint("[i] Networks detected: {}".format(len(DB.essids)))
+
+			for message, count in LOGGER.info.items():
+				xprint('[i] {}: {}'.format(message, count))
+			for message, count in LOGGER.warning.items():
+				xprint('[!] {}: {}'.format(message, count))
+			for message, count in LOGGER.error.items():
+				xprint('[!] {}: {}'.format(message, count))
+			for message, count in LOGGER.critical.items():
+				xprint('[!] {}: {}'.format(message, count))
+			for message, count in LOGGER.debug.items():
+				xprint('[@] {}: {}'.format(message, count))
+
 			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie).build()
 			if args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
@@ -1687,6 +1763,7 @@ def main():
 					("\n- Try a different export format (-x/--export)")+ \
 					("\n- Use -a/--all to export unauthenticated handshakes" if not args.all else "")+ \
 					("\n- Use --ignore-ie to ignore ie (AKM Check) (Not Recommended)" if not args.ignore_ie else "")+ \
+					("\n- Use --ignore-ts to ignore timestamps check (Not Recommended)" if (not args.ignore_ts and LOGGER.warning.get('Zero value timestamps detected')) else "")+ \
 					("\n- Remove the filter (-f/--filter-by)" if args.filter_by != [None, None] else "") \
 				)
 			xprint()
@@ -1709,6 +1786,7 @@ if __name__ == '__main__':
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
 	optional.add_argument("--do-not-clean", help="Do not clean output", action="store_true")
 	optional.add_argument("--ignore-ie", help="Ignore information element (AKM Check) (Not Recommended)", action="store_true")
+	optional.add_argument("--ignore-ts", help="Ignore timestamps check (Not Recommended)", action="store_true")
 	optional.add_argument("--quiet", "-q", help="Enable quiet mode (print only output files/data)", action="store_true")
 	optional.add_argument("--version", "-v", action='version', version=__version__)
 	optional.add_argument("--help", "-h", action='help', default=argparse.SUPPRESS,	help='show this help message and exit')
