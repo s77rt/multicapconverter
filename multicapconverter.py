@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -463,6 +463,9 @@ class excpkts(dict):
 					self[key][subkey].__setitem__(subsubkey, list(list(value.values())[0].values())[0])
 				else:
 					self[key][subkey][subsubkey].append(list(list(value.values())[0].values())[0][0])
+class hccaps(list):
+	def __init__(self):
+		list.__init__(self)
 class hccapxs(list):
 	def __init__(self):
 		list.__init__(self)
@@ -492,6 +495,7 @@ class Database(object):
 		super(Database, self).__init__()
 		self.essids = essids()
 		self.excpkts = excpkts()
+		self.hccaps = hccaps()
 		self.hccapxs = hccapxs()
 		self.hcwpaxs = hcwpaxs()
 		self.hcpmkids = hcpmkids()
@@ -534,6 +538,21 @@ class Database(object):
 			'keyver': keyver,
 			'keymic': keymic
 		}]}})
+	def hccap_add(self, bssid, essid, raw_data):
+		self.hccaps.append({ \
+			'bssid': bssid, \
+			'essid': essid, \
+			'raw_data': raw_data \
+		})
+	def hccap_groupby(self, group_by):
+		if group_by is None or group_by == "none":
+			self.hccaps = [{'key': 'none', 'raw_data': [v['raw_data'] for v in self.hccaps]}]
+		elif group_by == "handshake":
+			self.hccaps = [{'key': v['bssid']+"_"+str(k), 'raw_data': [v['raw_data']]} for k, v in enumerate(self.hccaps)]
+		else:
+			self.hccaps.sort(key=itemgetter(group_by))
+			self.hccaps = groupby(self.hccaps, key=itemgetter(group_by))
+			self.hccaps = [{'key': k, 'raw_data': [x['raw_data'] for x in v]} for k, v in self.hccaps]
 	def hccapx_add(self, bssid, essid, raw_data):
 		self.hccapxs.append({ \
 			'bssid': bssid, \
@@ -1404,6 +1423,8 @@ class Builder(object):
 		manager = Manager()
 		# Lists were we store requested DB operations from our workers
 		self.DB_hcwpaxs_add_list = manager.list()
+		self.DB_hccap_add_list = manager.list()
+		self.DB_hccap_groupby_list = manager.list()
 		self.DB_hccapx_add_list = manager.list()
 		self.DB_hccapx_groupby_list = manager.list()
 		self.DB_hcpmkid_add_list = manager.list()
@@ -1411,6 +1432,12 @@ class Builder(object):
 	# Helper functions to store each DB req to the right list
 	def DB_hcwpaxs_add(self, **kwords):
 		self.DB_hcwpaxs_add_list.append(kwords)
+	def DB_hccap_add(self, **kwords):
+		self.DB_hccap_add_list.append(kwords)
+	def DB_hccap_groupby(self, **kwords):
+		if self.DB_hccap_groupby_list:
+			return
+		self.DB_hccap_groupby_list.append(kwords)
 	def DB_hccapx_add(self, **kwords):
 		self.DB_hccapx_add_list.append(kwords)
 	def DB_hccapx_groupby(self, **kwords):
@@ -1581,7 +1608,9 @@ class Builder(object):
 								hccapx_to_pack['signature']  = byte_swap_32(hccapx_to_pack['signature'])
 								hccapx_to_pack['version']    = byte_swap_32(hccapx_to_pack['version'])
 								hccapx_to_pack['eapol_len']  = byte_swap_16(hccapx_to_pack['eapol_len'])
-							if self.export == "hccapx":
+							if self.export == "hcwpax":
+								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
+							elif self.export == "hccapx":
 								hccapx = struct.pack('=IIBB32BB16B6B32B6B32BH256B',	\
 									hccapx_to_pack['signature'], \
 									hccapx_to_pack['version'], \
@@ -1598,8 +1627,21 @@ class Builder(object):
 									*hccapx_to_pack['eapol'] \
 								)
 								self.DB_hccapx_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccapx)
-							elif self.export == "hcwpax":
-								self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="02", pmkid_or_mic=hccapx_to_pack['keymic'], mac_ap=hccapx_to_pack['mac_ap'], mac_sta=hccapx_to_pack['mac_sta'], essid=hccapx_to_pack['essid'][:hccapx_to_pack['essid_len']], anonce=hccapx_to_pack['nonce_ap'], eapol=hccapx_to_pack['eapol'][:hccapx_to_pack['eapol_len']], message_pair=hccapx_to_pack['message_pair'])
+							elif self.export == "hccap":
+								hccap_essid = (bytes(hccapx_to_pack['essid']+(0,0,0,0)))
+								hccap_essid = [hccap_essid[i:i+1] for i in range(0, len(hccap_essid), 1)]
+								hccap = struct.pack('=36c6B6B32B32B256Bii16B',	\
+									*hccap_essid, \
+									*hccapx_to_pack['mac_ap'], \
+									*hccapx_to_pack['mac_sta'], \
+									*hccapx_to_pack['nonce_sta'], \
+									*hccapx_to_pack['nonce_ap'], \
+									*hccapx_to_pack['eapol'], \
+									hccapx_to_pack['eapol_len'], \
+									hccapx_to_pack['keyver'], \
+									*hccapx_to_pack['keymic'] \
+								)
+								self.DB_hccap_add(bssid=bssidf.replace(':', '-').upper(), essid=essidf, raw_data=hccap)
 			### PMKID ###
 			if self.export == "hcwpax":
 				for pmkid in DB.pmkids.values():
@@ -1622,6 +1664,8 @@ class Builder(object):
 			#############
 		if self.export == "hccapx":
 			self.DB_hccapx_groupby(group_by=self.group_by)
+		elif self.export == "hccap":
+			self.DB_hccap_groupby(group_by=self.group_by)
 
 	def _pre_build(self):
 		pass
@@ -1639,6 +1683,10 @@ class Builder(object):
 		# For each returned DB operation request, perform that operation
 		for DB_hcwpaxs_add in self.DB_hcwpaxs_add_list:
 			DB.hcwpaxs_add(**DB_hcwpaxs_add)
+		for DB_hccap_add in self.DB_hccap_add_list:
+			DB.hccap_add(**DB_hccap_add)
+		if self.DB_hccap_groupby_list:
+			DB.hccap_groupby(**self.DB_hccap_groupby_list[0])
 		for DB_hccapx_add in self.DB_hccapx_add_list:
 			DB.hccapx_add(**DB_hccapx_add)
 		if self.DB_hccapx_groupby_list:
@@ -1702,7 +1750,25 @@ def main():
 				xprint('[@] {}: {}'.format(message, count))
 
 			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie).build()
-			if args.export == "hccapx" and len(DB.hccapxs):
+			if args.export == "hccap" and len(DB.hccaps):
+				written = 0
+				xprint("\nOutput hccap files:")
+				for hccap in DB.hccaps:
+					if args.output:
+						hccap_filename = (re.sub('\\.hccap(x?)$', '', args.output, flags=re.IGNORECASE)) + get_valid_filename("{}.hccap".format("_"+str(hccap['key']) if hccap['key'] != "none" else ''))
+					else:
+						if hccap['key'] == "none":
+							hccap_filename = re.sub('\\.(p?)cap((ng)?)((\\.gz)?)$', '', args.input, flags=re.IGNORECASE) + ".hccap"
+						else:
+							hccap_filename = get_valid_filename("{}.hccap".format(str(hccap['key'])))
+					print(hccap_filename)
+					hccap_file = open(hccap_filename, 'wb')
+					hccap_file.write(b''.join(hccap['raw_data']))
+					hccap_file.close()
+					written += len(hccap['raw_data'])
+				if written:
+					xprint("\nWritten {} WPA Handshakes to {} files".format(written, len(DB.hccaps)), end='')
+			elif args.export == "hccapx" and len(DB.hccapxs):
 				written = 0
 				xprint("\nOutput hccapx files:")
 				for hccapx in DB.hccapxs:
@@ -1775,11 +1841,11 @@ def main():
 #########################
 
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser(description='Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hcpmkid file', add_help=False)
+	parser = argparse.ArgumentParser(description='Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hccap/hcpmkid file', add_help=False)
 	required = parser.add_argument_group('required arguments')
 	optional = parser.add_argument_group('optional arguments')
 	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
-	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hcpmkid'], required=True)
+	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hccap', 'hcpmkid'], required=True)
 	optional.add_argument("--output", "-o", help="Output file", metavar="capture.hcwpax")
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])

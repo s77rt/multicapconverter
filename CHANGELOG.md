@@ -2,6 +2,10 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.7] - 29/01/2020
+### Added
+- Export as hccap (--export hccap) (hashcat mode = 2500 (legacy))
+
 ## [0.1.6] - 18/01/2020
 ### Fixed
 - Errors were not being reported
