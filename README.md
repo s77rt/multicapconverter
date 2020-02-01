@@ -1,21 +1,21 @@
 # multicapconverter.py
-Tool used to Convert a WPA cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hccap/hcpmkid file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
+Tool used to Convert a cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hccap/hcpmkid/hceapmd5/hceapleap file (re)written in Python (based on [c version]( https://github.com/hashcat/hashcat-utils/blob/master/src/cap2hccapx.c))
 ```
 usage: multicapconverter.py --input capture.cap --export
-                            {hcwpax,hccapx,hccap,hcpmkid}
+                            {hcwpax,hccapx,hccap,hcpmkid,hceapmd5,hceapleap}
                             [--output capture.hcwpax] [--all]
                             [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
                             [--do-not-clean] [--ignore-ie] [--ignore-ts]
                             [--quiet] [--version] [--help]
 
-Convert a WPA cap/pcap/pcapng capture file to a hashcat
-hcwpax/hccapx/hccap/hcpmkid file
+Convert a cap/pcap/pcapng capture file to a hashcat
+hcwpax/hccapx/hccap/hcpmkid/hceapmd5/hceapleap file
 
 required arguments:
   --input capture.cap, -i capture.cap
                         Input capture file
-  --export {hcwpax,hccapx,hccap,hcpmkid}, -x {hcwpax,hccapx,hccap,hcpmkid}
+  --export {hcwpax,hccapx,hccap,hcpmkid,hceapmd5,hceapleap}, -x {hcwpax,hccapx,hccap,hcpmkid,hceapmd5,hceapleap}
 
 optional arguments:
   --output capture.hcwpax, -o capture.hcwpax
@@ -41,6 +41,8 @@ optional arguments:
 - Export as hccapx (hashcat mode = 2500)
 - Export as hcpmkid (hashcat mode = 16800)
 - Export as hcwpax (hashcat mode = 22000)
+- Export as hceapmd5 (hashcat mode = 4800)
+- Export as hceapleap (hashcat mode = 5500)
 - Export only authenticated handshakes or all handshakes
 - Output files can be filtered/grouped
 - Supports hcxdumptool
@@ -111,11 +113,11 @@ Output hccapx files:
 Wifi.hccapx // 4
 ```
 ## Notes
- - --group-by does not effect hcwpax (WPA\*01 & WPA\*02) and hcpmkid output
- - --all does not effect hcwpax (WPA\*01) and hcpmkid output
+ - --group-by works only for hccap and hccapx output
+ - --all works only for hccap, hccapx and hcwpax (WPA\*02) output
  - by default, if a capture have both WPA\*01 and WPA\*02 (hcwpax format), WPA\*02 will be ignored on the exportation process. If you want to export both, use --do-not-clean
- - by default, multicapconverter does not export any pmkid from EAPOL-M1 due to the lack of AKM info. If you want to ignore AKM check, use --ignore-ie (Not Recommended)
- - by default, multicapconverter ignore packets with zeroed timestamps. If you want to process such packets, use --ignore-ts (Not Recommended)
+ - by default, multicapconverter ignores packets with zeroed timestamps. If you want to process such packets, use --ignore-ts (Not Recommended)
+ - by default, multicapconverter exports only pmkids that are PSK/PSK256 related (AKM check). If you want to ignore AKM check, use --ignore-ie (Not Recommended)
 
 ## TIPS
  - use --quiet for better performance

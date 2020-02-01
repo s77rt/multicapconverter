@@ -2,6 +2,16 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.8] - 01/02/2020
+### Changed
+- PMKIDs that are not PSK/PSK256 related won't be exported unless the user specify the --ignore-ie option
+- PMKIDs found in EAPOL-M1 won't be exported unless the keyver is 1, 2 or 3 (or if the user specify the --ignore-ie option)
+
+### Added
+- Support for WPA3
+- Export as hceapmd5 (--export hceapmd5) (hashcat mode = 4800)
+- Export as hceapleap (--export hceapleap) (hashcat mode = 5500)
+
 ## [0.1.7] - 29/01/2020
 ### Added
 - Export as hccap (--export hccap) (hashcat mode = 2500 (legacy))
