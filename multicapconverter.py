@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -1149,7 +1149,8 @@ def process_packet(packet, header):
 		if rc_llc == -1:
 			return
 		auth_offset = llc_offset + SIZE_OF_ieee80211_llc_snap_header_t
-		if packet[auth_offset+1] == AUTH_EAPOL:
+		auth_head_version, auth_head_type, auth_head_length = struct.unpack('=BBH', packet[auth_offset:auth_offset+4])
+		if auth_head_type == AUTH_EAPOL:
 			if len(packet[auth_offset:]) < 107:
 				keymic_size = 16
 				auth_packet_t_size = 99
@@ -1157,14 +1158,16 @@ def process_packet(packet, header):
 				l1 = struct.unpack('=H', packet[auth_offset+97:auth_offset+97+2])[0]
 				l2 = struct.unpack('=H', packet[auth_offset+105:auth_offset+105+2])[0]
 				if BIG_ENDIAN_HOST:
+					auth_head_length = byte_swap_16(auth_head_length)
 					l1 = byte_swap_16(l1)
 					l2 = byte_swap_16(l2)
+				auth_head_length = byte_swap_16(auth_head_length)
 				l1 = byte_swap_16(l1)
 				l2 = byte_swap_16(l2)
-				if l1 + 99 == len(packet[auth_offset:]):
+				if l1 + 99 == auth_head_length+4: # +4 is for the previous BBH
 					keymic_size = 16
 					auth_packet_t_size = 99
-				elif l2 + 107 == len(packet[auth_offset:]):
+				elif l2 + 107 == auth_head_length+4: # +4 is for the previous BBH
 					keymic_size = 24
 					auth_packet_t_size = 107
 					LOGGER.log('Keymic is 24 bytes (hccap(x) can\'t handle this)', WARNING)
@@ -1244,11 +1247,11 @@ def process_packet(packet, header):
 				auth_packet['key_length']          = byte_swap_16(auth_packet['key_length'])
 				auth_packet['replay_counter']      = byte_swap_64(auth_packet['replay_counter'])
 				auth_packet['wpa_key_data_length'] = byte_swap_16(auth_packet['wpa_key_data_length'])
-				auth_packet_copy[2]				   = byte_swap_16(auth_packet_copy[2])
-				auth_packet_copy[4]				   = byte_swap_16(auth_packet_copy[4])
-				auth_packet_copy[5]				   = byte_swap_16(auth_packet_copy[5])
-				auth_packet_copy[6]				   = byte_swap_64(auth_packet_copy[6])
-				auth_packet_copy[12]			   = byte_swap_16(auth_packet_copy[12])
+				auth_packet_copy[2]                = byte_swap_16(auth_packet_copy[2])
+				auth_packet_copy[4]                = byte_swap_16(auth_packet_copy[4])
+				auth_packet_copy[5]                = byte_swap_16(auth_packet_copy[5])
+				auth_packet_copy[6]                = byte_swap_64(auth_packet_copy[6])
+				auth_packet_copy[12]               = byte_swap_16(auth_packet_copy[12])
 			rest_packet = packet[auth_offset+auth_packet_t_size:]
 			rc_auth, excpkt = handle_auth(auth_packet, auth_packet_copy, auth_packet_t_size, keymic_size, rest_packet, auth_offset, header['caplen'])
 			if rc_auth == -1:
@@ -1267,7 +1270,7 @@ def process_packet(packet, header):
 						if akm is None and excpkt['keyver'] in [1, 2, 3]:
 							akm = AK_SAFE
 						DB.pmkid_add(mac_ap=ieee80211_hdr_3addr['addr1'], mac_sta=ieee80211_hdr_3addr['addr2'], pmkid=pmkid, akm=akm)
-		elif packet[auth_offset+1] == AUTH_EAP:
+		elif auth_head_type == AUTH_EAP:
 			if packet[auth_offset+4] in [1, 2]:
 				auth_id = packet[auth_offset+5:auth_offset+5+1].hex()
 				auth_type = packet[auth_offset+8]
@@ -1297,8 +1300,6 @@ def process_packet(packet, header):
 						mac_ap = ieee80211_hdr_3addr['addr3']
 						mac_sta = ieee80211_hdr_3addr['addr1'] if ieee80211_hdr_3addr['addr3'] != ieee80211_hdr_3addr['addr1'] else ieee80211_hdr_3addr['addr2']
 					DB.eapleap_add(auth_id=auth_id, mac_ap=mac_ap, mac_sta=mac_sta, auth_resp1=auth_resp1, auth_resp2=auth_resp2, auth_name=auth_name)
-			return
-		else:
 			return
 
 ######################### READ PACKETS #########################

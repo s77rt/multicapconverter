@@ -2,6 +2,10 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.1.9] - 05/02/2020
+### Fixed
+- Incorrect auth packet size calculation
+
 ## [0.1.8] - 01/02/2020
 ### Changed
 - PMKIDs that are not PSK/PSK256 related won't be exported unless the user specify the --ignore-ie option
