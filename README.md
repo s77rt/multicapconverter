@@ -6,8 +6,9 @@ usage: multicapconverter.py --input capture.cap --export
                             [--output capture.hcwpax] [--all]
                             [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
-                            [--do-not-clean] [--ignore-ie] [--ignore-ts]
-                            [--quiet] [--version] [--help]
+                            [--wordlist wordlist.txt] [--do-not-clean]
+                            [--ignore-ie] [--ignore-ts] [--quiet] [--version]
+                            [--help]
 
 Convert a cap/pcap/pcapng capture file to a hashcat
 hcwpax/hccapx/hccap/hcpmkid/hceapmd5/hceapleap file
@@ -24,6 +25,9 @@ optional arguments:
   --filter-by filter-by filter, -f filter-by filter
                         --filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}
   --group-by {none,bssid,essid,handshake}, -g {none,bssid,essid,handshake}
+  --wordlist wordlist.txt, -E wordlist.txt
+                        Extract wordlist / AP-LESS possible passwords (autohex
+                        enabled on non ASCII characters)
   --do-not-clean        Do not clean output
   --ignore-ie           Ignore information element (AKM Check) (Not
                         Recommended)
@@ -37,6 +41,7 @@ optional arguments:
 - Supports cap/pcap/pcapng
 - Supports combined cap/pcap/pcapng files
 - Supports gz compressed cap/pcap/pcapng files
+- Supports hcxdumptool
 - Export as hccap (hashcat mode = 2500 (legacy))
 - Export as hccapx (hashcat mode = 2500)
 - Export as hcpmkid (hashcat mode = 16800)
@@ -45,7 +50,7 @@ optional arguments:
 - Export as hceapleap (hashcat mode = 5500)
 - Export only authenticated handshakes or all handshakes
 - Output files can be filtered/grouped
-- Supports hcxdumptool
+- Extract wordlist / AP-LESS possible passwords
 
 ## Examples
 We have a capture file 'capture.cap' which includes 4 handshakes:
@@ -121,8 +126,3 @@ Wifi.hccapx // 4
 
 ## TIPS
  - use --quiet for better performance
-
-## TODO
- - Enhance performance and the way the script deals with structures
- - Fix performance issues when dealing with big capture files
- - Custom output file formats

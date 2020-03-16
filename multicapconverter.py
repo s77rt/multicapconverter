@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.1.9"
+__version__ = "0.2.0"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -19,13 +19,12 @@ import gzip
 from collections import namedtuple
 from operator import itemgetter
 from itertools import groupby, islice
-from enum import Enum
 from multiprocessing import Process, Manager
 
 ### Endianness ###
 if sys.byteorder == "big":
 	BIG_ENDIAN_HOST = True
-	xprint("WARNING! Endianness is not well tested on BIG_ENDIAN_HOST!")
+	xprint("WARNING! Endianness is not well tested on BIG_ENDIAN_HOST.")
 else:
 	BIG_ENDIAN_HOST = False
 ###
@@ -127,7 +126,7 @@ AUTH_EAPOL = 3
 AUTH_EAP_MD5 = 4
 AUTH_EAP_LEAP = 17
 
-BROADCAST_MAC = b'\xff\xff\xff\xff\xff\xff'
+BROADCAST_MAC = (255, 255, 255, 255, 255, 255)
 MAX_ESSID_LEN =  32
 EAPOL_TTL = 1
 TEST_REPLAYCOUNT = 0
@@ -148,12 +147,12 @@ WPA_KEY_INFO_ERROR = WBIT(10)
 WPA_KEY_INFO_REQUEST = WBIT(11)
 WPA_KEY_INFO_ENCR_KEY_DATA = WBIT(12) #  IEEE 802.11i/RSN only 
 
-ESSID_SOURCE_USER           = 1
-ESSID_SOURCE_REASSOC        = 2
-ESSID_SOURCE_ASSOC          = 3
-ESSID_SOURCE_PROBE          = 4
-ESSID_SOURCE_DIRECTED_PROBE = 5
-ESSID_SOURCE_BEACON         = 6
+ESSID_SOURCE_USER           = 10
+ESSID_SOURCE_REASSOC        = 20
+ESSID_SOURCE_ASSOC          = 30
+ESSID_SOURCE_PROBE          = 40
+ESSID_SOURCE_DIRECTED_PROBE = 50
+ESSID_SOURCE_BEACON         = 60
 
 EXC_PKT_NUM_1 = 1
 EXC_PKT_NUM_2 = 2
@@ -425,6 +424,7 @@ def to_signed_32(n):
 	n = n & 0xffffffff
 	return (n ^ 0x80000000) - 0x80000000
 def pymemcpy(src, count):
+	# pymemcpy has nothing to do with memory manipulation
 	dest = src[:count]
 	if isinstance(dest, bytes):
 		dest += b'\x00'*(count - len(dest))
@@ -449,6 +449,26 @@ def xprint(text="", end='\n', flush=True):
 
 ### Database-Like ###
 ## Tables:
+class statistics(dict):
+	"""
+	Convention:
+	statistics[bssid][X] = Number of frames type X in bssid
+	where X is a cosnt int (ESSID_SOURCE_* / EXC_PKT_NUM_*)
+	Examples:
+	statistics[bssid][1] = 5; means bssid packets contains 5 eapol-m1 frames
+	statistics[bssid][40] = 3; means bssid packets contains 3 undirected probe frames
+	"""
+	def __setitem__(self, key, value):
+		if key not in self:
+			dict.__setitem__(self, key, {value: 1})
+		else:
+			if value not in self[key]:
+				self[key].__setitem__(value, 1)
+			else:
+				self[key][value] += 1
+class passwords(list):
+	def __init__(self):
+		list.__init__(self)
 class essids(dict):
 	def __setitem__(self, key, value):
 		if key not in self:
@@ -533,6 +553,8 @@ class hceapleaps(dict):
 class Database(object):
 	def __init__(self):
 		super(Database, self).__init__()
+		self.statistics = statistics()
+		self.passwords = passwords()
 		self.essids = essids()
 		self.excpkts = excpkts()
 		self.eapmd5s = eapmd5s()
@@ -545,6 +567,14 @@ class Database(object):
 		self.pcapng_info = pcapng_info()
 		self.hceapmd5s = hceapmd5s()
 		self.hceapleaps = hceapleaps()
+	def statistic_add(self, bssid, data):
+		self.statistics.__setitem__(bssid, data)
+	def password_add(self, password):
+		for char in password:
+			if char < 0x20 or char > 0x7e:
+				self.passwords.append("$HEX[{}]".format(password.hex()))
+				return
+		self.passwords.append(password.decode('ascii'))
 	def essid_add(self, bssid, essid, essid_len, essid_source):
 		if len(self.essids) == DB_ESSID_MAX:
 			LOGGER.log('DB_ESSID_MAX Exceeded!', CRITICAL)
@@ -553,11 +583,13 @@ class Database(object):
 			return
 		key = pymemcpy(bssid, 6)
 		self.essids.__setitem__(key, {
-			'bssid': pymemcpy(bssid, 6),
+			'bssid': key,
 			'essid': essid,
 			'essid_len': essid_len,
 			'essid_source': essid_source
 		})
+		# Record data to statistics
+		self.statistic_add(key, essid_source)
 	def excpkt_add(self, excpkt_num, tv_sec, tv_usec, replay_counter, mac_ap, mac_sta, nonce, eapol_len, eapol, keyver, keymic):
 		if len(self.excpkts) == DB_EXCPKT_MAX:
 			LOGGER.log('DB_EXCPKT_MAX Exceeded!', CRITICAL)
@@ -574,14 +606,16 @@ class Database(object):
 			'tv_sec': tv_sec,
 			'tv_usec': tv_usec,
 			'replay_counter': replay_counter,
-			'mac_ap': pymemcpy(mac_ap, 6),
-			'mac_sta': pymemcpy(mac_sta, 6),
+			'mac_ap': key,
+			'mac_sta': subkey,
 			'nonce': pymemcpy(nonce, 32),
 			'eapol_len': eapol_len,
 			'eapol': eapol,
 			'keyver': keyver,
 			'keymic': keymic
 		}]}})
+		# Record data to statistics
+		self.statistic_add(key, excpkt_num)
 	def eapmd5_add(self, auth_id, mac_ap, mac_sta, auth_hash, auth_salt):
 		key = mac_ap
 		subkey = hash(auth_id+bytes(mac_ap+mac_sta).hex())
@@ -736,7 +770,7 @@ def get_essid_from_tag(packet, header, length_skip):
 		if (cur + taglen) >= end:
 			break
 		if tagtype == MFIE_TYPE_SSID:
-			if taglen < MAX_ESSID_LEN:
+			if taglen <= MAX_ESSID_LEN:
 				essid = {}
 				essid['essid'] = pymemcpy(beacon[cur:cur+taglen], MAX_ESSID_LEN)
 				essid['essid_len'] = taglen
@@ -987,7 +1021,7 @@ def read_pcap_file_header(pcap):
 		bitness = 0
 	elif pcap_file_header['magic'] == TCPDUMP_CIGAM:
 		bitness = 1
-		xprint("WARNING Endianness(big) is not well tested!")
+		xprint("WARNING! BigEndian (Endianness) files are not well tested.")
 	else:
 		LOGGER.log('Invalid pcap header', WARNING)
 		raise ValueError('Invalid pcap header')
@@ -1034,7 +1068,7 @@ def read_pcapng_file_header(pcapng):
 				pcapng_file_header['snaplen'] = byte_swap_32(pcapng_file_header['snaplen'])
 				pcapng_file_header['linktype'] = byte_swap_32(pcapng_file_header['linktype'])
 				bitness = 1
-				xprint("WARNING Endianness(big) is not well tested!")
+				xprint("WARNING! BigEndian (Endianness) files are not well tested.")
 			else:
 				continue
 			pcapng_file_header['section_options'] = []
@@ -1044,7 +1078,7 @@ def read_pcapng_file_header(pcapng):
 			pcapng_file_header['interface_options'] = []
 			for option in read_options(interface['block_body'][8:], bitness):
 				if option['code'] == if_tsresol_code:
-					if_tsresol = option['code']
+					if_tsresol = ord(option['value'][:option['length']])
 					## currently only supports if_tsresol = 6
 					if if_tsresol != 6:
 						LOGGER.log('Unsupported if_tsresol', WARNING)
@@ -1078,13 +1112,14 @@ def process_packet(packet, header):
 		ieee80211_hdr_3addr['seq_ctrl']      = byte_swap_16(ieee80211_hdr_3addr['seq_ctrl'])
 	frame_control = ieee80211_hdr_3addr['frame_control']
 	if frame_control & IEEE80211_FCTL_FTYPE == IEEE80211_FTYPE_MGMT:
-		if bytes(ieee80211_hdr_3addr['addr3']) == BROADCAST_MAC:
-			return
 		stype = frame_control & IEEE80211_FCTL_STYPE
 		if stype == IEEE80211_STYPE_BEACON:
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_beacon_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
+				return
+			DB.password_add(essid['essid'][:essid['essid_len']]) # AP-LESS
+			if ieee80211_hdr_3addr['addr3'] == BROADCAST_MAC:
 				return
 			DB.essid_add(bssid=ieee80211_hdr_3addr['addr3'], essid=essid['essid'], essid_len=essid['essid_len'], essid_source=ESSID_SOURCE_BEACON)
 		elif stype == IEEE80211_STYPE_PROBE_REQ:
@@ -1092,27 +1127,28 @@ def process_packet(packet, header):
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
 				return
+			DB.password_add(essid['essid'][:essid['essid_len']]) # AP-LESS
+			if ieee80211_hdr_3addr['addr3'] == BROADCAST_MAC:
+				return
 			DB.essid_add(bssid=ieee80211_hdr_3addr['addr3'], essid=essid['essid'], essid_len=essid['essid_len'], essid_source=ESSID_SOURCE_PROBE)
 		elif stype == IEEE80211_STYPE_PROBE_RESP:
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_beacon_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
 				return
+			DB.password_add(essid['essid'][:essid['essid_len']]) # AP-LESS
+			if ieee80211_hdr_3addr['addr3'] == BROADCAST_MAC:
+				return
 			DB.essid_add(bssid=ieee80211_hdr_3addr['addr3'], essid=essid['essid'], essid_len=essid['essid_len'], essid_source=ESSID_SOURCE_PROBE)
 		elif stype == IEEE80211_STYPE_ASSOC_REQ:
-			mac_ap = ieee80211_hdr_3addr['addr3']
-			if mac_ap == ieee80211_hdr_3addr['addr1']:
-				mac_sta = ieee80211_hdr_3addr['addr2']
-			else:
-				mac_sta = ieee80211_hdr_3addr['addr1']
-			for pmkid, akm in get_pmkid_from_packet(packet, stype):
-				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid, akm=akm)
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_assocreq_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
 				return
+			DB.password_add(essid['essid'][:essid['essid_len']]) # AP-LESS
+			if ieee80211_hdr_3addr['addr3'] == BROADCAST_MAC:
+				return
 			DB.essid_add(bssid=ieee80211_hdr_3addr['addr3'], essid=essid['essid'], essid_len=essid['essid_len'], essid_source=ESSID_SOURCE_ASSOC)
-		elif stype == IEEE80211_STYPE_REASSOC_REQ:
 			mac_ap = ieee80211_hdr_3addr['addr3']
 			if mac_ap == ieee80211_hdr_3addr['addr1']:
 				mac_sta = ieee80211_hdr_3addr['addr2']
@@ -1120,11 +1156,22 @@ def process_packet(packet, header):
 				mac_sta = ieee80211_hdr_3addr['addr1']
 			for pmkid, akm in get_pmkid_from_packet(packet, stype):
 				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid, akm=akm)
+		elif stype == IEEE80211_STYPE_REASSOC_REQ:
 			length_skip = SIZE_OF_ieee80211_hdr_3addr_t + SIZE_OF_reassocreq_t
 			rc_beacon, essid = get_essid_from_tag(packet, header, length_skip)
 			if rc_beacon == -1:
 				return
+			DB.password_add(essid['essid'][:essid['essid_len']]) # AP-LESS
+			if ieee80211_hdr_3addr['addr3'] == BROADCAST_MAC:
+				return
 			DB.essid_add(bssid=ieee80211_hdr_3addr['addr3'], essid=essid['essid'], essid_len=essid['essid_len'], essid_source=ESSID_SOURCE_REASSOC)
+			mac_ap = ieee80211_hdr_3addr['addr3']
+			if mac_ap == ieee80211_hdr_3addr['addr1']:
+				mac_sta = ieee80211_hdr_3addr['addr2']
+			else:
+				mac_sta = ieee80211_hdr_3addr['addr1']
+			for pmkid, akm in get_pmkid_from_packet(packet, stype):
+				DB.pmkid_add(mac_ap=mac_ap, mac_sta=mac_sta, pmkid=pmkid, akm=akm)
 	elif frame_control & IEEE80211_FCTL_FTYPE == IEEE80211_FTYPE_DATA:
 		addr4_exist = ((frame_control & (IEEE80211_FCTL_TODS | IEEE80211_FCTL_FROMDS)) == (IEEE80211_FCTL_TODS | IEEE80211_FCTL_FROMDS))
 		if (frame_control & IEEE80211_FCTL_STYPE) == IEEE80211_STYPE_QOS_DATA:
@@ -1331,7 +1378,7 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False):
 			m2 = m2_tmp
 			if len(m2) == n_bytes:
 				return m2
-		return b''	
+		return b''
 	while True:
 		pcap_pkthdr = read(SIZE_OF_pcap_pkthdr_t)
 		if not pcap_pkthdr:
@@ -1472,22 +1519,20 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 			else:
 				continue
 			header = {}
-			timestamp_high = struct.unpack("I", struct.pack("4B", *header_block['block_body'][4:8]))[0]
-			timestamp_low = struct.unpack("I", struct.pack("4B", *header_block['block_body'][8:12]))[0]
-			timestamp_high, timestamp_low = byte_swap_32(timestamp_high), timestamp_low
+			timestamp = (header_block['block_body'][8]) | (header_block['block_body'][9])<<8 | (header_block['block_body'][10])<<16 | (header_block['block_body'][11])<<24 | (header_block['block_body'][4])<<32 | (header_block['block_body'][5])<<40 | (header_block['block_body'][6])<<48 | (header_block['block_body'][7])<<56
 			header['caplen']   = byte_swap_32(struct.unpack("I", struct.pack("4B", *header_block['block_body'][12:16]))[0])
 			header['len']      = byte_swap_32(struct.unpack("I", struct.pack("4B", *header_block['block_body'][16:20]))[0])
 			header['caplen']   = byte_swap_32(header['caplen'])
 			header['len']      = byte_swap_32(header['len'])
 			if BIG_ENDIAN_HOST:
-				timestamp_high, timestamp_low = byte_swap_32(timestamp_high), timestamp_low
+				timestamp          = byte_swap_64(timestamp)
 				header['caplen']   = byte_swap_32(header['caplen'])
 				header['len']      = byte_swap_32(header['len'])
 			if bitness:
-				timestamp_high, timestamp_low = byte_swap_32(timestamp_high), timestamp_low
+				timestamp          = byte_swap_64(timestamp)
 				header['caplen']   = byte_swap_32(header['caplen'])
 				header['len']      = byte_swap_32(header['len'])
-			header['tv_sec'], header['tv_usec'] = timestamp_high, timestamp_low
+			header['tv_sec'], header['tv_usec'] = (timestamp//1000000), (timestamp%1000000)
 			if header['tv_sec'] == 0 and header['tv_usec'] == 0:
 				header_error = 'Zero value timestamps detected'
 				if not ignore_ts:
@@ -1644,7 +1689,7 @@ class Builder(object):
 			bssid = bytes(essid['bssid']).hex()
 			essidf = essid['essid'].decode(encoding='utf-8', errors='ignore').rstrip('\x00')
 			bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
-			xprint('\n[*] BSSID={} ESSID={} (Length: {}){}'.format( \
+			xprint('\n|*| BSSID={} ESSID={} (Length: {}){}'.format( \
 				bssidf, \
 				essidf, \
 				essid['essid_len'], \
@@ -1654,7 +1699,27 @@ class Builder(object):
 			if (self.filters[0] == "essid" and self.filters[1] != essidf) or (self.filters[0] == "bssid" and self.filters[1] != bssid):
 				continue
 			##############
+			### STATS (1/2) ###
+			FRAMES_EAPOL_M1 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_1, 0)
+			FRAMES_EAPOL_M2 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_2, 0)
+			FRAMES_EAPOL_M3 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_3, 0)
+			FRAMES_EAPOL_M4 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_4, 0)
+			xprint('| | EAPOL-M1: {}, EAPOL-M2: {}, EAPOL-M3: {}, EAPOL-M4: {}'.format(FRAMES_EAPOL_M1, FRAMES_EAPOL_M2, FRAMES_EAPOL_M3, FRAMES_EAPOL_M4))
+			FRAMES_BEACON = DB.statistics[essid['bssid']].get(ESSID_SOURCE_BEACON, 0)
+			FRAMES_ASSOC = DB.statistics[essid['bssid']].get(ESSID_SOURCE_ASSOC, 0)
+			FRAMES_REASSOC = DB.statistics[essid['bssid']].get(ESSID_SOURCE_REASSOC, 0)
+			FRAMES_PROBE = DB.statistics[essid['bssid']].get(ESSID_SOURCE_PROBE, 0)
+			xprint('| | BEACON: {}, ASSOC: {}, REASSOC: {}, PROBE: {}'.format(FRAMES_BEACON, FRAMES_ASSOC, FRAMES_REASSOC, FRAMES_PROBE))
+			###################
 			if self.export not in ['hceapmd5', 'hceapleap']:
+				### STATS (2/2) ###
+				if FRAMES_EAPOL_M1 < 2:
+					xprint('| ! WARNING! Not enough EAPOL-M1 frames (<2). This makes it impossible to calculate nonce-error-correction values.')
+				if (FRAMES_ASSOC + FRAMES_REASSOC) == 0:
+					xprint('| ! WARNING! Missing important frames (ASSOC, REASSOC). This makes it hard to recover the PSK.')
+				if FRAMES_PROBE == 0:
+					xprint('| ! WARNING! Missing undirected probe frames (PROBE). This makes it hard to recover the PSK.')
+				###################
 				excpkts_AP_ = DB.excpkts.get(essid['bssid'])
 				if excpkts_AP_ and self.export != "hcpmkid":
 					for excpkts_AP_STA_ in excpkts_AP_.values():
@@ -1711,7 +1776,7 @@ class Builder(object):
 									else:
 										continue
 								else:
-									xprint('[!] BUG! AP:{} STA:{}'.format(excpkt_ap['excpkt_num'], excpkt_sta['excpkt_num']))
+									xprint('| ! BUG! AP:{} STA:{}'.format(excpkt_ap['excpkt_num'], excpkt_sta['excpkt_num']))
 								skip = 0
 								auth = 1
 								ap_less = 0
@@ -1753,13 +1818,13 @@ class Builder(object):
 								mac_sta = bytes(excpkt_sta['mac_sta']).hex()
 								if skip == 0:
 									if auth == 1:
-										xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=Y'.format( \
+										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Authenticated=Y'.format( \
 											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 											message_pair, \
 											excpkt_sta['replay_counter'] \
 										))
 									else:
-										xprint(' --> STA={}, Message Pair={}, Replay Counter={}, Authenticated=N{}{}'.format( \
+										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Authenticated=N{}{}'.format( \
 											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 											message_pair, \
 											excpkt_sta['replay_counter'], \
@@ -1769,7 +1834,7 @@ class Builder(object):
 										if not self.export_unauthenticated:
 											continue
 								else:
-									xprint(' --> STA={}, Message Pair={} [Skipped]'.format( \
+									xprint('| > STA={}, Message Pair={} [Skipped]'.format( \
 										':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 										message_pair \
 									))
@@ -1844,7 +1909,7 @@ class Builder(object):
 						if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256, AK_SAFE]):
 							self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 							mac_sta = pmkid['mac_sta']
-							xprint(' --> STA={} [PMKID {}]'.format( \
+							xprint('| > STA={} [PMKID {}]'.format( \
 								':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 								pmkid['pmkid'] \
 							))
@@ -1853,7 +1918,7 @@ class Builder(object):
 						if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256, AK_SAFE]):
 							self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 							mac_sta = pmkid['mac_sta']
-							xprint(' --> STA={} [PMKID {}]'.format( \
+							xprint('| > STA={} [PMKID {}]'.format( \
 								':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 								pmkid['pmkid'] \
 							))
@@ -1863,7 +1928,7 @@ class Builder(object):
 				eapmd5s_AP_ = DB.eapmd5s.get(essid['bssid'])
 				if eapmd5s_AP_:
 					for eapmd5s_AP_STA_ in eapmd5s_AP_.values():
-						xprint(' --> STA={}, ID={}'.format( \
+						xprint('| > STA={}, ID={}'.format( \
 							':'.join(bytes(eapmd5s_AP_STA_['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 							eapmd5s_AP_STA_['id'] \
 						))
@@ -1874,7 +1939,7 @@ class Builder(object):
 				eapleaps_AP_ = DB.eapleaps.get(essid['bssid'])
 				if eapleaps_AP_:
 					for eapleaps_AP_STA_ in eapleaps_AP_.values():
-						xprint(' --> STA={}, ID={}, NAME={}'.format( \
+						xprint('| > STA={}, ID={}, NAME={}'.format( \
 							':'.join(bytes(eapleaps_AP_STA_['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 							eapleaps_AP_STA_['id'], \
 							eapleaps_AP_STA_['name'] \
@@ -1924,13 +1989,13 @@ class Builder(object):
 				if not DB.essids.get(key):
 					bssid = bytes(key).hex()
 					bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
-					xprint('\n[*] BSSID={} (Undetected)'.format(bssidf), end='')
+					xprint('\n|*| BSSID={} (Undetected)'.format(bssidf), end='')
 					if (self.filters[0] == "essid") or (self.filters[0] == "bssid" and self.filters[1] != bssid):
 						xprint(' [Skipped]')
 						continue
 					xprint()
 					for v in value.values():
-						xprint(' --> STA={}, ID={}'.format( \
+						xprint('| > STA={}, ID={}'.format( \
 							':'.join(bytes(v['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 							v['id'] \
 						))
@@ -1941,13 +2006,13 @@ class Builder(object):
 				if not DB.essids.get(key):
 					bssid = bytes(key).hex()
 					bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
-					xprint('\n[*] BSSID={} (Undetected)'.format(bssidf), end='')
+					xprint('\n|*| BSSID={} (Undetected)'.format(bssidf), end='')
 					if (self.filters[0] == "essid") or (self.filters[0] == "bssid" and self.filters[1] != bssid):
 						xprint(' [Skipped]')
 						continue
 					xprint()
 					for v in value.values():
-						xprint(' --> STA={}, ID={}, NAME={}'.format( \
+						xprint('| > STA={}, ID={}, NAME={}'.format( \
 							':'.join(bytes(v['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 							v['id'], \
 							v['name'] \
@@ -1994,7 +2059,7 @@ def main():
 				exit()
 
 			xprint("[i] Networks detected: {}".format(len(DB.essids)))
-			xprint("[i] WPA: {}, EAP-MD5: {}, EAP-LEAP: {}".format(len(DB.excpkts), len(DB.eapmd5s), len(DB.eapleaps)))
+			xprint("[i] WPA: {}, EAP-MD5: {}, EAP-LEAP: {}".format(len(DB.essids)-len(DB.eapmd5s)-len(DB.eapleaps), len(DB.eapmd5s), len(DB.eapleaps)))
 
 			for message, count in LOGGER.info.items():
 				xprint('[i] {}: {}'.format(message, count))
@@ -2008,6 +2073,15 @@ def main():
 				xprint('[@] {}: {}'.format(message, count))
 
 			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie).build()
+
+			if args.wordlist and len(DB.passwords):
+				xprint("\nMiscellaneous:")
+				# AP-LESS possible passwords
+				DB.passwords = list(set(DB.passwords)) # Remove duplicates
+				wordlist_file = open(args.wordlist, 'w')
+				wordlist_file.write('\n'.join(DB.passwords)+'\n')
+				wordlist_file.close()
+				xprint("Extracted {} AP-LESS possible passwords to {}\n".format(len(DB.passwords), args.wordlist), end='')
 			if args.export == "hccap" and len(DB.hccaps):
 				written = 0
 				xprint("\nOutput hccap files:")
@@ -2146,6 +2220,7 @@ if __name__ == '__main__':
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
+	optional.add_argument("--wordlist", "-E", help="Extract wordlist / AP-LESS possible passwords (autohex enabled on non ASCII characters)", metavar="wordlist.txt")
 	optional.add_argument("--do-not-clean", help="Do not clean output", action="store_true")
 	optional.add_argument("--ignore-ie", help="Ignore information element (AKM Check) (Not Recommended)", action="store_true")
 	optional.add_argument("--ignore-ts", help="Ignore timestamps check (Not Recommended)", action="store_true")

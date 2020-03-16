@@ -2,6 +2,15 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.2.0] - 16/03/2020
+### Fixed
+- Incorrect timestamps extraction for pcapng
+- Incorrect timestamps resolutions check for pcapng
+
+### Added
+- Extract wordlist / AP-LESS possible passwords option (--wordlist wordlist)
+- Better info about each network
+
 ## [0.1.9] - 05/02/2020
 ### Fixed
 - Incorrect auth packet size calculation
