@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -576,31 +576,37 @@ class Database(object):
 				return
 		self.passwords.append(password.decode('ascii'))
 	def essid_add(self, bssid, essid, essid_len, essid_source):
+		# Init
+		key = pymemcpy(bssid, 6)
+		# Record data to statistics
+		self.statistic_add(key, essid_source)
+		# Check
+		if essid_len == 0 or not essid:
+			return
 		if len(self.essids) == DB_ESSID_MAX:
 			LOGGER.log('DB_ESSID_MAX Exceeded!', CRITICAL)
 			raise ValueError('DB_ESSID_MAX Exceeded!')
-		if essid_len == 0 or not essid:
-			return
-		key = pymemcpy(bssid, 6)
+		# Add
 		self.essids.__setitem__(key, {
 			'bssid': key,
 			'essid': essid,
 			'essid_len': essid_len,
 			'essid_source': essid_source
 		})
-		# Record data to statistics
-		self.statistic_add(key, essid_source)
 	def excpkt_add(self, excpkt_num, tv_sec, tv_usec, replay_counter, mac_ap, mac_sta, nonce, eapol_len, eapol, keyver, keymic):
-		if len(self.excpkts) == DB_EXCPKT_MAX:
-			LOGGER.log('DB_EXCPKT_MAX Exceeded!', CRITICAL)
-			raise ValueError('DB_EXCPKT_MAX Exceeded!')
+		# Init
 		key = pymemcpy(mac_ap, 6)
 		subkey = pymemcpy(mac_sta, 6)
 		subsubkey = 'ap' if excpkt_num in [EXC_PKT_NUM_1, EXC_PKT_NUM_3] else 'sta'
-		check = self.excpkts.get(key, {}).get(subkey, {}).get(subsubkey, {})
-		for c in check:
-			if c['eapol'] == eapol or (c['nonce'] == nonce and c['keymic'] == keymic):
-				return
+		# Record data to statistics
+		self.statistic_add(key, excpkt_num)
+		# Check
+		if nonce == ZERO*32:
+			return
+		if len(self.excpkts) == DB_EXCPKT_MAX:
+			LOGGER.log('DB_EXCPKT_MAX Exceeded!', CRITICAL)
+			raise ValueError('DB_EXCPKT_MAX Exceeded!')
+		# Add
 		self.excpkts.__setitem__(key, {subkey: {subsubkey: [{
 			'excpkt_num': excpkt_num,
 			'tv_sec': tv_sec,
@@ -614,8 +620,6 @@ class Database(object):
 			'keyver': keyver,
 			'keymic': keymic
 		}]}})
-		# Record data to statistics
-		self.statistic_add(key, excpkt_num)
 	def eapmd5_add(self, auth_id, mac_ap, mac_sta, auth_hash, auth_salt):
 		key = mac_ap
 		subkey = hash(auth_id+bytes(mac_ap+mac_sta).hex())
@@ -887,8 +891,6 @@ def handle_auth(auth_packet, auth_packet_copy, auth_packet_t_size, keymic_size, 
 			excpkt_num = EXC_PKT_NUM_4
 		else:
 			excpkt_num = EXC_PKT_NUM_2
-	if auth_packet['wpa_key_nonce'] == ZERO*32:
-		return -1, None
 	excpkt = {}
 	excpkt['nonce'] = pymemcpy(auth_packet['wpa_key_nonce'], 32)
 	excpkt['replay_counter'] = ap_replay_counter
@@ -1739,7 +1741,8 @@ class Builder(object):
 							if not excpkts_AP_STA_sta:
 								continue
 							for excpkt_sta in excpkts_AP_STA_sta:
-								valid_replay_counter = True if (excpkt_ap['replay_counter'] == excpkt_sta['replay_counter']) else False
+								if (excpkt_ap['replay_counter'] != excpkt_sta['replay_counter']):
+									continue
 								if excpkt_ap['excpkt_num'] < excpkt_sta['excpkt_num']:
 									if excpkt_ap['tv_sec'] > excpkt_sta['tv_sec']:
 										continue
@@ -1802,34 +1805,44 @@ class Builder(object):
 												break
 									#############################
 								### LE/BE/NC ###
-								for excpkt_sta_k in excpkts_AP_STA_sta:
-									if (excpkt_ap['nonce'][:28] == excpkt_sta_k['nonce'][:28]) and (excpkt_ap['nonce'][28:] != excpkt_sta_k['nonce'][28:]):
+								for excpkt_ap_k in excpkts_AP_STA_ap:
+									if (excpkt_ap['nonce'][:28] == excpkt_ap_k['nonce'][:28]) and (excpkt_ap['nonce'][28:] != excpkt_ap_k['nonce'][28:]):
 										if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
 											message_pair |= MESSAGE_PAIR_NC
-										if excpkt_ap['nonce'][31] != excpkt_sta_k['nonce'][31]:
+										if excpkt_ap['nonce'][31] != excpkt_ap_k['nonce'][31]:
 											if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
 												message_pair |= MESSAGE_PAIR_LE
-										elif excpkt_ap['nonce'][28] != excpkt_sta_k['nonce'][28]:
+										elif excpkt_ap['nonce'][28] != excpkt_ap_k['nonce'][28]:
 											if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
 												message_pair |= MESSAGE_PAIR_BE
-								if not valid_replay_counter and message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
-									message_pair |= MESSAGE_PAIR_NC
+								for excpkt_sta_k in excpkts_AP_STA_sta:
+									if (excpkt_sta['nonce'][:28] == excpkt_sta_k['nonce'][:28]) and (excpkt_sta['nonce'][28:] != excpkt_sta_k['nonce'][28:]):
+										if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
+											message_pair |= MESSAGE_PAIR_NC
+										if excpkt_sta['nonce'][31] != excpkt_sta_k['nonce'][31]:
+											if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
+												message_pair |= MESSAGE_PAIR_LE
+										elif excpkt_sta['nonce'][28] != excpkt_sta_k['nonce'][28]:
+											if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
+												message_pair |= MESSAGE_PAIR_BE
 								################
 								mac_sta = bytes(excpkt_sta['mac_sta']).hex()
 								if skip == 0:
 									if auth == 1:
-										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Authenticated=Y'.format( \
-											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
-											message_pair, \
-											excpkt_sta['replay_counter'] \
-										))
-									else:
-										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Authenticated=N{}{}'.format( \
+										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Time Gap={}, Authenticated=Y'.format( \
 											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 											message_pair, \
 											excpkt_sta['replay_counter'], \
-											'' if self.export_unauthenticated else ' [Skipped]', \
-											' (AP-LESS)' if ap_less else '' \
+											abs(excpkt_ap['tv_usec'] - excpkt_sta['tv_usec']) \
+										))
+									else:
+										xprint('| > STA={}, Message Pair={}, Replay Counter={}, Time Gap={}, Authenticated=N{}{}'.format( \
+											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
+											message_pair, \
+											excpkt_sta['replay_counter'], \
+											abs(excpkt_ap['tv_usec'] - excpkt_sta['tv_usec']), \
+											' (AP-LESS)' if ap_less else '', \
+											'' if self.export_unauthenticated else ' [Skipped]' \
 										))
 										if not self.export_unauthenticated:
 											continue

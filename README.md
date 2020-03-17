@@ -118,6 +118,7 @@ Output hccapx files:
 Wifi.hccapx // 4
 ```
 ## Notes
+ - Time Gap is in microseconds
  - --group-by works only for hccap and hccapx output
  - --all works only for hccap, hccapx and hcwpax (WPA\*02) output
  - by default, if a capture have both WPA\*01 and WPA\*02 (hcwpax format), WPA\*02 will be ignored on the exportation process. If you want to export both, use --do-not-clean

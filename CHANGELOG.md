@@ -2,6 +2,18 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [0.2.1] - 17/03/2020
+### Fixed
+- LE/BE/NC detection issues
+- EAPOL messages with zeroed nonce weren't being counted
+- EAPOL messages with duplicated data were being skipped
+
+### Changed
+- Packets with mismatched replay counter will be ignored
+
+### Added
+- Time Gap calculations for better analysis
+
 ## [0.2.0] - 16/03/2020
 ### Fixed
 - Incorrect timestamps extraction for pcapng
