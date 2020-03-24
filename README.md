@@ -7,8 +7,8 @@ usage: multicapconverter.py --input capture.cap --export
                             [--filter-by filter-by filter]
                             [--group-by {none,bssid,essid,handshake}]
                             [--wordlist wordlist.txt] [--do-not-clean]
-                            [--ignore-ie] [--ignore-ts] [--quiet] [--version]
-                            [--help]
+                            [--ignore-ie] [--ignore-ts] [--quiet]
+                            [--update-oui] [--locate] [--version] [--help]
 
 Convert a cap/pcap/pcapng capture file to a hashcat
 hcwpax/hccapx/hccap/hcpmkid/hceapmd5/hceapleap file
@@ -33,6 +33,8 @@ optional arguments:
                         Recommended)
   --ignore-ts           Ignore timestamps check (Not Recommended)
   --quiet, -q           Enable quiet mode (print only output files/data)
+  --update-oui          Update OUI Database
+  --locate              Locate networks geolocations
   --version, -v         show program's version number and exit
   --help, -h            show this help message and exit
 ```
@@ -51,8 +53,22 @@ optional arguments:
 - Export only authenticated handshakes or all handshakes
 - Output files can be filtered/grouped
 - Extract wordlist / AP-LESS possible passwords
+- MAC VENDOR LOOKUP
+- MAC GEOLOCATION LOOKUP (requires [hashC](https://hashc.co.uk/) API)
 
-## Examples
+## Configuration
+### Setting hashC_APIKEY
+(only required for MAC GEOLOCATION LOOKUP)  
+After getting your api key from hashC (via [website](https://hashc.co.uk/) or [email](mailto:support@hashc.co.uk))
+Open your command prompt / terminal and execute:
+#### For Linux
+`export hashC_APIKEY=YOUR_APIKEY_HERE`
+#### For Mac
+`export hashC_APIKEY=YOUR_APIKEY_HERE`
+#### For Windows
+`set hashC_APIKEY=YOUR_APIKEY_HERE`
+
+## Usage Examples
 We have a capture file 'capture.cap' which includes 4 handshakes:
 
 | # | BSSID             | ESSID    | AUTHENTICATED |
@@ -117,10 +133,16 @@ python3 multicapconverter.py -i capture.cap --group-by essid --filter-by bssid 0
 Output hccapx files:
 Wifi.hccapx // 4
 ```
+## Miscellaneous
+ - Extract wordlist `--wordlist wordlist.txt`
+ - Update OUI Database `--update-oui`
+ - Locate networks locations `--locate`
+
 ## Notes
  - Time Gap is in microseconds
  - --group-by works only for hccap and hccapx output
  - --all works only for hccap, hccapx and hcwpax (WPA\*02) output
+ - --locate and --update-oui works only if -q/--quiet is not set
  - by default, if a capture have both WPA\*01 and WPA\*02 (hcwpax format), WPA\*02 will be ignored on the exportation process. If you want to export both, use --do-not-clean
  - by default, multicapconverter ignores packets with zeroed timestamps. If you want to process such packets, use --ignore-ts (Not Recommended)
  - by default, multicapconverter exports only pmkids that are PSK/PSK256 related (AKM check). If you want to ignore AKM check, use --ignore-ie (Not Recommended)

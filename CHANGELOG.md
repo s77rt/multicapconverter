@@ -2,6 +2,17 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [1.0.0] - 24/03/2020
+### Fixed
+- Some issues while dealing with BE files
+
+### Changed
+- Changed pmkid separator from "\*" to ":" (--export hcpmkid)
+
+### Added
+- MAC VENDOR LOOKUP
+- MAC GEOLOCATION LOOKUP (--locate)
+
 ## [0.2.1] - 17/03/2020
 ### Fixed
 - LE/BE/NC detection issues
