@@ -2,6 +2,14 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [1.1.0] - 22/10/2020
+### Fixed
+- Fixed HCXDUMPTOOL Custom Block identification
+
+### Changed
+- OUI_DB_FILE set to an absolute path
+
+
 ## [1.0.0] - 24/03/2020
 ### Fixed
 - Some issues while dealing with BE files

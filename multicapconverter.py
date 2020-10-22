@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -25,7 +25,7 @@ from multiprocessing import Process, Manager
 """ The api key below is temporarily
 Get your api key from https://hashc.co.uk/
 Or contact support@hashc.co.uk
-IMPORTANT: DO NOT change the api key below, instead use an environment variable
+IMPORTANT: DO NOT change the api key below, instead use the environment variable: hashC_APIKEY
 """
 hashC_APIKEY = os.environ.get('hashC_APIKEY', 'TESTxQfS8hIKcALYZIfYz14IYGxbWQbJ0mKLFE7e0hIbIIt4J3K7Ce5Xcdshqngr')
 ################################
@@ -39,7 +39,7 @@ else:
 ###
 
 ### Constants ###
-OUI_DB_FILE = "oui.csv"
+OUI_DB_FILE = os.path.join(os.path.expanduser('~'), "oui.csv")
 OUI_DB_URL = "http://standards-oui.ieee.org/oui/oui.csv"
 
 HCCAPX_VERSION   =  4
@@ -140,8 +140,8 @@ Custom_Option_Codes = [2988, 2989, 19372, 19373]
 if_tsresol_code = 9
 opt_endofopt = 0
 
-HCXDUMPTOOL_PEN = 0x2a, 0xce, 0x46, 0xa1
-HCXDUMPTOOL_MAGIC_NUMBER = 0x2a, 0xce, 0x46, 0xa1, 0x79, 0xa0, 0x72, 0x33, 0x83, 0x37, 0x27, 0xab, 0x59, 0x33, 0xb3, 0x62, 0x45, 0x37, 0x11, 0x47, 0xa7, 0xcf, 0x32, 0x7f, 0x8d, 0x69, 0x80, 0xc0, 0x89, 0x5e, 0x5e, 0x98
+HCXDUMPTOOL_PEN = bytes([0x2a, 0xce, 0x46, 0xa1])
+HCXDUMPTOOL_MAGIC_NUMBER = bytes([0x2a, 0xce, 0x46, 0xa1, 0x79, 0xa0, 0x72, 0x33, 0x83, 0x37, 0x27, 0xab, 0x59, 0x33, 0xb3, 0x62, 0x45, 0x37, 0x11, 0x47, 0xa7, 0xcf, 0x32, 0x7f, 0x8d, 0x69, 0x80, 0xc0, 0x89, 0x5e, 0x5e, 0x98])
 HCXDUMPTOOL_OPTIONCODE_RC			= 0xf29c
 HCXDUMPTOOL_OPTIONCODE_ANONCE		= 0xf29d
 
@@ -722,6 +722,7 @@ class Database(object):
 			'excpkt_num': excpkt_num,
 			'tv_sec': tv_sec,
 			'tv_usec': tv_usec,
+			'tv_abs': (tv_sec*1000*1000)+tv_usec,
 			'replay_counter': replay_counter,
 			'mac_ap': key,
 			'mac_sta': subkey,
@@ -1083,7 +1084,7 @@ def read_custom_block(custom_block, bitness):
 			options = []
 			for option in read_options(custom_block[36:], bitness):
 				if option['code'] == HCXDUMPTOOL_OPTIONCODE_RC:
-					option['value'] = byte_swap_64(int(option['value'].hex(), 16))
+					option['value'] = GetUint64(option['value'])
 					if BIG_ENDIAN_HOST:
 						option['value'] = byte_swap_64(option['value'])
 					if bitness:
@@ -1802,14 +1803,14 @@ class Builder(object):
 								if (excpkt_ap['replay_counter'] != excpkt_sta['replay_counter']):
 									continue
 								if excpkt_ap['excpkt_num'] < excpkt_sta['excpkt_num']:
-									if excpkt_ap['tv_sec'] > excpkt_sta['tv_sec']:
+									if excpkt_ap['tv_abs'] > excpkt_sta['tv_abs']:
 										continue
-									if (excpkt_ap['tv_sec'] + EAPOL_TTL) < excpkt_sta['tv_sec']:
+									if (excpkt_ap['tv_abs'] + (EAPOL_TTL*1000*1000)) < excpkt_sta['tv_abs']:
 										continue
 								else:
-									if excpkt_sta['tv_sec'] > excpkt_ap['tv_sec']:
+									if excpkt_sta['tv_abs'] > excpkt_ap['tv_abs']:
 										continue
-									if (excpkt_sta['tv_sec'] + EAPOL_TTL) < excpkt_ap['tv_sec']:
+									if (excpkt_sta['tv_abs'] + (EAPOL_TTL*1000*1000)) < excpkt_ap['tv_abs']:
 										continue
 								message_pair = 255
 								if (excpkt_ap['excpkt_num'] == EXC_PKT_NUM_1) and (excpkt_sta['excpkt_num'] == EXC_PKT_NUM_2):
@@ -1857,7 +1858,7 @@ class Builder(object):
 												elif info['code'] == HCXDUMPTOOL_OPTIONCODE_ANONCE:
 													if bytes(excpkt_ap['nonce']) == info['value']:
 														check_2 = True
-											if check_1 and check_2 and message_pair & MESSAGE_PAIR_APLESS != MESSAGE_PAIR_APLESS:
+											if check_1 and check_2:
 												ap_less = 1
 												message_pair |= MESSAGE_PAIR_APLESS
 												break
@@ -1865,24 +1866,18 @@ class Builder(object):
 								### LE/BE/NC ###
 								for excpkt_ap_k in excpkts_AP_STA_ap:
 									if (excpkt_ap['nonce'][:28] == excpkt_ap_k['nonce'][:28]) and (excpkt_ap['nonce'][28:] != excpkt_ap_k['nonce'][28:]):
-										if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
-											message_pair |= MESSAGE_PAIR_NC
+										message_pair |= MESSAGE_PAIR_NC
 										if excpkt_ap['nonce'][31] != excpkt_ap_k['nonce'][31]:
-											if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
-												message_pair |= MESSAGE_PAIR_LE
+											message_pair |= MESSAGE_PAIR_LE
 										elif excpkt_ap['nonce'][28] != excpkt_ap_k['nonce'][28]:
-											if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
-												message_pair |= MESSAGE_PAIR_BE
+											message_pair |= MESSAGE_PAIR_BE
 								for excpkt_sta_k in excpkts_AP_STA_sta:
 									if (excpkt_sta['nonce'][:28] == excpkt_sta_k['nonce'][:28]) and (excpkt_sta['nonce'][28:] != excpkt_sta_k['nonce'][28:]):
-										if message_pair & MESSAGE_PAIR_NC != MESSAGE_PAIR_NC:
-											message_pair |= MESSAGE_PAIR_NC
+										message_pair |= MESSAGE_PAIR_NC
 										if excpkt_sta['nonce'][31] != excpkt_sta_k['nonce'][31]:
-											if message_pair & MESSAGE_PAIR_LE != MESSAGE_PAIR_LE:
-												message_pair |= MESSAGE_PAIR_LE
+											message_pair |= MESSAGE_PAIR_LE
 										elif excpkt_sta['nonce'][28] != excpkt_sta_k['nonce'][28]:
-											if message_pair & MESSAGE_PAIR_BE != MESSAGE_PAIR_BE:
-												message_pair |= MESSAGE_PAIR_BE
+											message_pair |= MESSAGE_PAIR_BE
 								################
 								mac_sta = bytes(excpkt_sta['mac_sta']).hex()
 								if skip == 0:
@@ -1892,7 +1887,7 @@ class Builder(object):
 												':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 												message_pair, \
 												excpkt_sta['replay_counter'], \
-												abs(excpkt_ap['tv_usec'] - excpkt_sta['tv_usec']) \
+												abs(excpkt_ap['tv_abs'] - excpkt_sta['tv_abs']) \
 											))
 									else:
 										if not self.Q:
@@ -1900,7 +1895,7 @@ class Builder(object):
 												':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 												message_pair, \
 												excpkt_sta['replay_counter'], \
-												abs(excpkt_ap['tv_usec'] - excpkt_sta['tv_usec']), \
+												abs(excpkt_ap['tv_abs'] - excpkt_sta['tv_abs']), \
 												' (AP-LESS)' if ap_less else '', \
 												'' if self.export_unauthenticated else ' [Skipped]' \
 											))
