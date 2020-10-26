@@ -2,6 +2,11 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [1.1.1] - 26/10/2020
+### Fixed
+- Fixed BIG_ENDIAN_HOST pcapng block_length
+- Fixed reading corrupted files
+
 ## [1.1.0] - 22/10/2020
 ### Fixed
 - Fixed HCXDUMPTOOL Custom Block identification

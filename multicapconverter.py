@@ -6,7 +6,7 @@ __credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -1029,11 +1029,9 @@ def read_blocks(pcapng):
 	while True:
 		block_type, block_length = GetUint32(pcapng.read(4)), GetUint32(pcapng.read(4))
 		if BIG_ENDIAN_HOST:
-			block_length = byte_swap_32(block_length)
-		block_body_length = block_length - 12
-		if BIG_ENDIAN_HOST:
 			block_type = byte_swap_32(block_type)
 			block_length = byte_swap_32(block_length)
+		block_body_length = max(block_length - 12, 0)
 		block = {
 			'block_type': block_type, \
 			'block_length': block_length, \
@@ -1448,7 +1446,7 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False, Q=Tr
 			header_count += 1
 			try:
 				packet_error = None
-				packet = cap_file.read(header['caplen'])
+				packet = cap_file.read(max(header['caplen'], 0))
 				if pcap_file_header['linktype'] == DLT_IEEE802_11_PRISM:
 					if header['caplen'] < SIZE_OF_prism_header_t:
 						packet_error = 'Could not read prism header'
