@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "Abdelhafidh Belalia (s77rt)"
-__credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt <philsmd@hashcat.net>', 'ZerBea (https://github.com/ZerBea)', 'RealEnder (https://github.com/RealEnder)']
+__credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt <philsmd@hashcat.net>', 'ZerBea (https://github.com/ZerBea)', 'RealEnder (https://github.com/RealEnder)', 'Carmix (https://github.com/gcarmix)']
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -153,6 +153,8 @@ AK_SAFE = -1
 DB_ESSID_MAX  = 50000
 DB_EXCPKT_MAX = 100000
 MAX_WORK_PER_PROCESS = 100
+
+custom_essid = b''
 
 # Log Levels
 INFO = 10
@@ -869,6 +871,7 @@ class Status(object):
 
 ### HX-Functions ###
 def get_essid_from_tag(packet, header, length_skip):
+	global custom_essid
 	if length_skip > header['caplen']:
 		return -1, None
 	length = header['caplen'] - length_skip
@@ -887,9 +890,13 @@ def get_essid_from_tag(packet, header, length_skip):
 		if tagtype == MFIE_TYPE_SSID:
 			if taglen <= MAX_ESSID_LEN:
 				essid = {}
-				essid['essid'] = beacon[cur:cur+taglen]
-				essid['essid'] += b'\x00'*(MAX_ESSID_LEN - len(essid['essid']))
-				essid['essid_len'] = taglen
+				if len(custom_essid) > 0:
+					essid['essid'] = custom_essid
+					essid['essid_len'] = len(essid['essid'])
+				else:
+					essid['essid'] = beacon[cur:cur+taglen]
+					essid['essid'] += b'\x00'*(MAX_ESSID_LEN - len(essid['essid']))
+					essid['essid_len'] = taglen	
 				return 0, essid
 		cur += taglen
 	return -1, None
@@ -2095,6 +2102,9 @@ class Builder(object):
 ######################### MAIN #########################
 
 def main(Q):
+	global custom_essid
+	if args.essid:
+		custom_essid = bytes(args.essid,'utf-8')
 	if os.path.isfile(args.input):
 		cap_file = read_file(args.input)
 		if not Q:
@@ -2285,6 +2295,7 @@ if __name__ == '__main__':
 	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
 	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hccap', 'hcpmkid', 'hceapmd5', 'hceapleap'], required=True)
 	optional.add_argument("--output", "-o", help="Output file", metavar="capture.hcwpax")
+	optional.add_argument("--essid","-e",help="led user add ESSID to beacon when missing (cloaked ESSID)")
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')

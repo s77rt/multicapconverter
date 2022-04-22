@@ -2,6 +2,9 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [1.1.2] - 22/04/2022
+- Added feature to let user indicate ESSID when missing from pcap file (cloaked ESSID)
+
 ## [1.1.1] - 26/10/2020
 ### Fixed
 - Fixed BIG_ENDIAN_HOST pcapng block_length
