@@ -2104,8 +2104,8 @@ class Builder(object):
 
 def main(Q):
 	global custom_essid
-	if args.overwrite_essid:
-		custom_essid = bytes(args.overwrite_essid,'utf-8')
+	if args.cloaked_essid:
+		custom_essid = bytes(args.cloaked_essid,'utf-8')
 	if os.path.isfile(args.input):
 		cap_file = read_file(args.input)
 		if not Q:
@@ -2296,7 +2296,7 @@ if __name__ == '__main__':
 	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
 	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hccap', 'hcpmkid', 'hceapmd5', 'hceapleap'], required=True)
 	optional.add_argument("--output", "-o", help="Output file", metavar="capture.hcwpax")
-	optional.add_argument("--overwrite-essid",help="let user add ESSID to beacon when missing (cloaked ESSID)")
+	optional.add_argument("--cloaked-essid",help="let user add ESSID to beacon when missing (cloaked ESSID)")
 	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
 	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
 	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
