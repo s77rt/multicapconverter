@@ -2,11 +2,15 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "Abdelhafidh Belalia (s77rt)"
-__credits__ = ['Jens Steube <jens.steube@gmail.com>', 'Philipp "philsmd" Schmidt <philsmd@hashcat.net>', 'ZerBea (https://github.com/ZerBea)', 'RealEnder (https://github.com/RealEnder)', 'Carmix (https://github.com/gcarmix)']
+__credits__ = ['Jens Steube <jens.steube@gmail.com>',
+               'Philipp "philsmd" Schmidt <philsmd@hashcat.net>',
+               'ZerBea (https://github.com/ZerBea)',
+               'RealEnder (https://github.com/RealEnder)',
+               'Carmix (https://github.com/gcarmix)']
 __license__ = "MIT"
 __maintainer__ = "Abdelhafidh Belalia (s77rt)"
 __email__ = "admin@abdelhafidh.com"
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 __github__ = "https://github.com/s77rt/multicapconverter/"
 
 import os
@@ -21,13 +25,6 @@ from operator import itemgetter
 from itertools import groupby
 from multiprocessing import Process, Manager
 
-###### User Configurations #####
-""" The api key below is temporarily
-Get your api key from https://hashc.co.uk/
-Or contact support@hashc.co.uk
-IMPORTANT: DO NOT change the api key below, instead use the environment variable: hashC_APIKEY
-"""
-hashC_APIKEY = os.environ.get('hashC_APIKEY', 'TESTxQfS8hIKcALYZIfYz14IYGxbWQbJ0mKLFE7e0hIbIIt4J3K7Ce5Xcdshqngr')
 ################################
 
 ### Endianness ###
@@ -154,14 +151,17 @@ DB_ESSID_MAX  = 50000
 DB_EXCPKT_MAX = 100000
 MAX_WORK_PER_PROCESS = 100
 
-custom_essid = b''
-
 # Log Levels
 INFO = 10
 WARNING = 20
 ERROR = 30
 CRITICAL = 40
 DEBUG = 50
+###
+
+### VARIABLES ###
+QUIET = False
+CUSTOM_ESSID = b''
 ###
 
 ### LOGGER ###
@@ -240,28 +240,23 @@ def xprint(text="", end='\n', flush=True):
 	print(text, end=end, flush=flush)
 ###
 
-### MAC LOOKUP ###
-# VENDOR LOOKUP
+### MAC VENDOR LOOKUP ###
 class MAC_VENDOR_LOOKUP(object):
-	def __init__(self, db):
+	def __init__(self, localFile, remoteFile):
 		super(MAC_VENDOR_LOOKUP, self).__init__()
-		self.db_isUpdated = False
-		if not os.path.isfile(db):
-			self.download_db(db)
-		self.db = db
+		self.localFile = localFile
+		self.remoteFile = remoteFile
 		self.data = {}
 		self.load_data()
-	def download_db(self, db):
-		if self.db_isUpdated:
-			return
-		if os.path.isfile(db):
-			os.remove(db)
+	def download_data(self):
+		if os.path.isfile(self.localFile):
+			os.remove(self.localFile)
 		xprint("[i] Downloading OUI Database...", end='\r', flush=True)
-		response = requests.get(OUI_DB_URL, stream=True)
+		response = requests.get(self.remoteFile, stream=True)
 		filesize_total = int(response.headers.get('content-length', 1))
 		filesize_downloaded = 0
 		prev_time = time.time()
-		with open(db+'.tmp', "wb") as handle:
+		with open(self.localFile+'.tmp', "wb") as handle:
 			for data in response.iter_content():
 				filesize_downloaded += len(data)
 				if time.time() - prev_time > 1:
@@ -269,12 +264,13 @@ class MAC_VENDOR_LOOKUP(object):
 						xprint('[i] Downloading OUI Database...{:05.2f}%'.format((filesize_downloaded/filesize_total)*100), end='\r', flush=True)
 					prev_time = time.time()
 				handle.write(data)
-		os.rename(db+'.tmp', db)
-		self.db_isUpdated = True
+		os.rename(self.localFile+'.tmp', self.localFile)
 		xprint("[i] Downloading OUI Database.......OK", flush=True)
 	def load_data(self):
-		with open(self.db, 'r') as dbfile:
-			for line in dbfile:
+		if not os.path.isfile(self.localFile):
+			return
+		with open(self.localFile, 'r') as localFile:
+			for line in localFile:
 				try:
 					vendor = re.search(r',([0-9A-F]{6}),(?:(?:"(.+?)",)|(.+?),)', line)
 					self.data[vendor.group(1)] = vendor.group(2) or vendor.group(3)
@@ -282,282 +278,7 @@ class MAC_VENDOR_LOOKUP(object):
 					pass
 	def lookup(self, mac):
 		return self.data.get(mac[:6].upper(), 'N/A')
-# GEOLOCATION LOOKUP
-class MAC_GEO_LOOKUP(object):
-	def __init__(self):
-		super(MAC_GEO_LOOKUP, self).__init__()
-		self.bbox = {
-			'Afghanistan': [29.3772, 38.4910682, 60.5176034, 74.889862],
-			'Aland Islands': [59.4541578, 60.87665, 19.0832098, 21.3456556],
-			'Albania': [39.6448625, 42.6610848, 19.1246095, 21.0574335],
-			'Algeria': [18.968147, 37.2962055, -8.668908, 11.997337],
-			'American Samoa': [-14.7608358, -10.8449746, -171.2951296, -167.9322899],
-			'Andorra': [42.4288238, 42.6559357, 1.4135781, 1.7863837],
-			'Angola': [-18.038945, -4.3880634, 11.4609793, 24.0878856],
-			'Anguilla': [18.0615454, 18.7951194, -63.6391992, -62.7125449],
-			'Antarctica': [-85.0511287, -60.0, -180.0, 180.0],
-			'Antigua and Barbuda': [16.7573901, 17.929, -62.5536517, -61.447857],
-			'Argentina': [-55.1850761, -21.781168, -73.5600329, -53.6374515],
-			'Armenia': [38.8404775, 41.300712, 43.4471395, 46.6333087],
-			'Aruba': [12.1702998, 12.8102998, -70.2809842, -69.6409842],
-			'Australia': [-55.3228175, -9.0882278, 72.2460938, 168.2249543],
-			'Austria': [46.3722761, 49.0205305, 9.5307487, 17.160776],
-			'Azerbaijan': [38.3929551, 41.9502947, 44.7633701, 51.0090302],
-			'Bahamas': [20.7059846, 27.4734551, -80.7001941, -72.4477521],
-			'Bahrain': [25.535, 26.6872444, 50.2697989, 50.9233693],
-			'Bangladesh': [20.3756582, 26.6382534, 88.0075306, 92.6804979],
-			'Barbados': [12.845, 13.535, -59.8562115, -59.2147175],
-			'Belarus': [51.2575982, 56.17218, 23.1783344, 32.7627809],
-			'Belgium': [49.4969821, 51.5516667, 2.3889137, 6.408097],
-			'Belize': [15.8857286, 18.496001, -89.2262083, -87.3098494],
-			'Benin': [6.0398696, 12.4092447, 0.776667, 3.843343],
-			'Bermuda': [32.0469651, 32.5913693, -65.1232222, -64.4109842],
-			'Bhutan': [26.702016, 28.246987, 88.7464724, 92.1252321],
-			'Bolivia': [-22.8982742, -9.6689438, -69.6450073, -57.453],
-			'Bosnia and Herzegovina': [42.5553114, 45.2764135, 15.7287433, 19.6237311],
-			'Botswana': [-26.9059669, -17.778137, 19.9986474, 29.375304],
-			'Bouvet Island': [-54.654, -54.187, 2.9345531, 3.7791099],
-			'Brazil': [-33.8689056, 5.2842873, -73.9830625, -28.6341164],
-			'British Indian Ocean Territory': [-7.6454079, -5.037066, 71.036504, 72.7020157],
-			'British Virgin Islands': [17.623468, 18.464984, -65.159094, -64.512674],
-			'Brunei': [4.002508, 5.1011857, 114.0758734, 115.3635623],
-			'Bulgaria': [41.2353929, 44.2167064, 22.3571459, 28.8875409],
-			'Burkina Faso': [9.4104718, 15.084, -5.5132416, 2.4089717],
-			'Burundi': [-4.4693155, -2.3096796, 29.0007401, 30.8498462],
-			'Cambodia': [9.4752639, 14.6904224, 102.3338282, 107.6276788],
-			'Cameroon': [1.6546659, 13.083333, 8.3822176, 16.1921476],
-			'Canada': [41.6765556, 83.3362128, -141.00275, -52.3231981],
-			'Cape Verde': [14.8031546, 17.2053108, -25.3609478, -22.6673416],
-			'Cayman Islands': [19.0620619, 19.9573759, -81.6313748, -79.5110954],
-			'Central African Republic': [2.2156553, 11.001389, 14.4155426, 27.4540764],
-			'Chad': [7.44107, 23.4975, 13.47348, 24.0],
-			'Chile': [-56.725, -17.4983998, -109.6795789, -66.0753474],
-			'China': [8.8383436, 53.5608154, 73.4997347, 134.7754563],
-			'Christmas Island': [-10.5698515, -10.4123553, 105.5336422, 105.7130159],
-			'Cocos Islands': [-12.4055983, -11.6213132, 96.612524, 97.1357343],
-			'Colombia': [-4.2316872, 16.0571269, -82.1243666, -66.8511907],
-			'Comoros': [-12.621, -11.165, 43.025305, 44.7451922],
-			'Cook Islands': [-22.15807, -8.7168792, -166.0856468, -157.1089329],
-			'Costa Rica': [5.3329698, 11.2195684, -87.2722647, -82.5060208],
-			'Croatia': [42.1765993, 46.555029, 13.2104814, 19.4470842],
-			'Cuba': [19.6275294, 23.4816972, -85.1679702, -73.9190004],
-			'Cyprus': [34.4383706, 35.913252, 32.0227581, 34.8553182],
-			'Czech Republic': [48.5518083, 51.0557036, 12.0905901, 18.859216],
-			'Democratic Republic of the Congo': [-13.459035, 5.3920026, 12.039074, 31.3056758],
-			'Denmark': [54.4516667, 57.9524297, 7.7153255, 15.5530641],
-			'Djibouti': [10.9149547, 12.7923081, 41.7713139, 43.6579046],
-			'Dominica': [15.0074207, 15.7872222, -61.6869184, -61.0329895],
-			'Dominican Republic': [17.2701708, 21.303433, -72.0574706, -68.1101463],
-			'East Timor': [-9.5642775, -8.0895459, 124.0415703, 127.5335392],
-			'Ecuador': [-5.0159314, 1.8835964, -92.2072392, -75.192504],
-			'Egypt': [22.0, 31.8330854, 24.6499112, 37.1153517],
-			'El Salvador': [12.976046, 14.4510488, -90.1790975, -87.6351394],
-			'Equatorial Guinea': [-1.6732196, 3.989, 5.4172943, 11.3598628],
-			'Eritrea': [12.3548219, 18.0709917, 36.4333653, 43.3001714],
-			'Estonia': [57.5092997, 59.9383754, 21.3826069, 28.2100175],
-			'Ethiopia': [3.397448, 14.8940537, 32.9975838, 47.9823797],
-			'Falkland Islands': [-53.1186766, -50.7973007, -61.7726772, -57.3662367],
-			'Faroe Islands': [61.3915553, 62.3942991, -7.6882939, -6.2565525],
-			'Fiji': [-21.9434274, -12.2613866, 172.0, -178.5],
-			'Finland': [59.4541578, 70.0922939, 19.0832098, 31.5867071],
-			'France': [41.2632185, 51.268318, -5.4534286, 9.8678344],
-			'French Guiana': [2.112222, 5.7507111, -54.60278, -51.6346139],
-			'French Polynesia': [-28.0990232, -7.6592173, -154.9360599, -134.244799],
-			'French Southern Territories': [-50.2187169, -11.3139928, 39.4138676, 77.8494974],
-			'Gabon': [-4.1012261, 2.3182171, 8.5002246, 14.539444],
-			'Gambia': [13.061, 13.8253137, -17.0288254, -13.797778],
-			'Georgia': [41.0552922, 43.5864294, 39.8844803, 46.7365373],
-			'Germany': [47.2701114, 55.099161, 5.8663153, 15.0419319],
-			'Ghana': [4.5392525, 11.1748562, -3.260786, 1.2732942],
-			'Gibraltar': [36.100807, 36.180807, -5.3941295, -5.3141295],
-			'Greece': [34.7006096, 41.7488862, 19.2477876, 29.7296986],
-			'Greenland': [59.515387, 83.875172, -74.1250416, -10.0288759],
-			'Grenada': [11.786, 12.5966532, -62.0065868, -61.1732143],
-			'Guadeloupe': [15.8320085, 16.5144664, -61.809764, -61.0003663],
-			'Guam': [13.182335, 13.706179, 144.563426, 145.009167],
-			'Guatemala': [13.6345804, 17.8165947, -92.3105242, -88.1755849],
-			'Guernsey': [49.4155331, 49.5090776, -2.6751703, -2.501814],
-			'Guinea': [7.1906045, 12.67563, -15.5680508, -7.6381993],
-			'Guinea-Bissau': [10.6514215, 12.6862384, -16.894523, -13.6348777],
-			'Guyana': [1.1710017, 8.6038842, -61.414905, -56.4689543],
-			'Haiti': [17.9099291, 20.2181368, -75.2384618, -71.6217461],
-			'Heard Island and McDonald Islands': [-53.394741, -52.7030677, 72.2460938, 74.1988754],
-			'Honduras': [12.9808485, 17.619526, -89.3568207, -82.1729621],
-			'Hong Kong': [22.1193278, 22.4393278, 114.0028131, 114.3228131],
-			'Hungary': [45.737128, 48.585257, 16.1138867, 22.8977094],
-			'Iceland': [63.0859177, 67.353, -25.0135069, -12.8046162],
-			'India': [6.5546079, 35.6745457, 68.1113787, 97.395561],
-			'Indonesia': [-11.2085669, 6.2744496, 94.7717124, 141.0194444],
-			'Iran': [24.8465103, 39.7816502, 44.0318908, 63.3332704],
-			'Iraq': [29.0585661, 37.380932, 38.7936719, 48.8412702],
-			'Ireland': [51.222, 55.636, -11.0133788, -5.6582363],
-			'Isle of Man': [54.0539576, 54.4178705, -4.7946845, -4.3076853],
-			'Israel': [29.4533796, 33.3356317, 34.2674994, 35.8950234],
-			'Italy': [35.2889616, 47.0921462, 6.6272658, 18.7844746],
-			'Ivory Coast': [4.1621205, 10.740197, -8.601725, -2.493031],
-			'Jamaica': [16.5899443, 18.7256394, -78.5782366, -75.7541143],
-			'Japan': [20.2145811, 45.7112046, 122.7141754, 154.205541],
-			'Jersey': [49.1625179, 49.2621288, -2.254512, -2.0104193],
-			'Jordan': [29.183401, 33.3750617, 34.8844372, 39.3012981],
-			'Kazakhstan': [40.5686476, 55.4421701, 46.4932179, 87.3156316],
-			'Kenya': [-4.8995204, 4.62, 33.9098987, 41.899578],
-			'Kiribati': [-7.0516717, 7.9483283, -179.1645388, -164.1645388],
-			'Kuwait': [28.5243622, 30.1038082, 46.5526837, 49.0046809],
-			'Kyrgyzstan': [39.1728437, 43.2667971, 69.2649523, 80.2295793],
-			'Laos': [13.9096752, 22.5086717, 100.0843247, 107.6349989],
-			'Latvia': [55.6746505, 58.0855688, 20.6715407, 28.2414904],
-			'Lebanon': [33.0479858, 34.6923543, 34.8825667, 36.625],
-			'Lesotho': [-30.6772773, -28.570615, 27.0114632, 29.4557099],
-			'Liberia': [4.1555907, 8.5519861, -11.6080764, -7.367323],
-			'Libya': [19.5008138, 33.3545898, 9.391081, 25.3770629],
-			'Liechtenstein': [47.0484291, 47.270581, 9.4716736, 9.6357143],
-			'Lithuania': [53.8967893, 56.4504213, 20.653783, 26.8355198],
-			'Luxembourg': [49.4969821, 50.430377, 4.9684415, 6.0344254],
-			'Macao': [22.0766667, 22.2170361, 113.5281666, 113.6301389],
-			'Macedonia': [40.8536596, 42.3735359, 20.4529023, 23.034051],
-			'Madagascar': [-25.6071002, -11.9519693, 43.2202072, 50.4862553],
-			'Malawi': [-17.1296031, -9.3683261, 32.6703616, 35.9185731],
-			'Malaysia': [-5.1076241, 9.8923759, 105.3471939, 120.3471939],
-			'Maldives': [-0.9074935, 7.3106246, 72.3554187, 73.9700962],
-			'Mali': [10.147811, 25.001084, -12.2402835, 4.2673828],
-			'Malta': [35.6029696, 36.2852706, 13.9324226, 14.8267966],
-			'Marshall Islands': [-0.5481258, 14.4518742, 163.4985095, 178.4985095],
-			'Martinique': [14.3948596, 14.8787029, -61.2290815, -60.8095833],
-			'Mauritania': [14.7209909, 27.314942, -17.068081, -4.8333344],
-			'Mauritius': [-20.725, -10.138, 56.3825151, 63.7151319],
-			'Mayotte': [-13.0210119, -12.6365902, 45.0183298, 45.2999917],
-			'Mexico': [14.3886243, 32.7186553, -118.59919, -86.493266],
-			'Micronesia': [0.827, 10.291, 137.2234512, 163.2364054],
-			'Moldova': [45.4674139, 48.4918695, 26.6162189, 30.1636756],
-			'Monaco': [43.7247599, 43.7519311, 7.4090279, 7.4398704],
-			'Mongolia': [41.5800276, 52.1496, 87.73762, 119.931949],
-			'Montenegro': [41.7495999, 43.5585061, 18.4195781, 20.3561641],
-			'Montserrat': [16.475, 17.0152978, -62.450667, -61.9353818],
-			'Morocco': [21.3365321, 36.0505269, -17.2551456, -0.998429],
-			'Mozambique': [-26.9209427, -10.3252149, 30.2138197, 41.0545908],
-			'Myanmar': [9.4399432, 28.547835, 92.1719423, 101.1700796],
-			'Namibia': [-28.96945, -16.9634855, 11.5280384, 25.2617671],
-			'Nauru': [-0.5541334, -0.5025906, 166.9091794, 166.9589235],
-			'Nepal': [26.3477581, 30.446945, 80.0586226, 88.2015257],
-			'Netherlands': [50.7295671, 53.7253321, 1.9193492, 7.2274985],
-			'Netherlands Antilles': [12.1544542, 12.1547472, -68.940593, -68.9403518],
-			'New Caledonia': [-23.2217509, -17.6868616, 162.6034343, 167.8109827],
-			'New Zealand': [-52.8213687, -29.0303303, -179.059153, 179.3643594],
-			'Nicaragua': [10.7076565, 15.0331183, -87.901532, -82.6227023],
-			'Niger': [11.693756, 23.517178, 0.1689653, 15.996667],
-			'Nigeria': [4.0690959, 13.885645, 2.676932, 14.678014],
-			'Niue': [-19.3548665, -18.7534559, -170.1595029, -169.5647229],
-			'Norfolk Island': [-29.333, -28.796, 167.6873878, 168.2249543],
-			'North Korea': [37.5867855, 43.0089642, 124.0913902, 130.924647],
-			'Northern Mariana Islands': [14.036565, 20.616556, 144.813338, 146.154418],
-			'Norway': [57.7590052, 71.3848787, 4.0875274, 31.7614911],
-			'Oman': [16.4649608, 26.7026737, 52, 60.054577],
-			'Pakistan': [23.5393916, 37.084107, 60.872855, 77.1203914],
-			'Palau': [2.748, 8.222, 131.0685462, 134.7714735],
-			'Palestinian Territory': [31.2201289, 32.5521479, 34.0689732, 35.5739235],
-			'Panama': [7.0338679, 9.8701757, -83.0517245, -77.1393779],
-			'Papua New Guinea': [-13.1816069, 1.8183931, 136.7489081, 151.7489081],
-			'Paraguay': [-27.6063935, -19.2876472, -62.6442036, -54.258],
-			'Peru': [-20.1984472, -0.0392818, -84.6356535, -68.6519906],
-			'Philippines': [4.2158064, 21.3217806, 114.0952145, 126.8072562],
-			'Pitcairn': [-25.1306736, -23.8655769, -130.8049862, -124.717534],
-			'Poland': [49.0020468, 55.0336963, 14.1229707, 24.145783],
-			'Portugal': [29.8288021, 42.1543112, -31.5575303, -6.1891593],
-			'Puerto Rico': [17.9268695, 18.5159789, -67.271492, -65.5897525],
-			'Qatar': [24.4707534, 26.3830212, 50.5675, 52.638011],
-			'Republic of the Congo': [-5.149089, 3.713056, 11.0048205, 18.643611],
-			'Reunion': [-21.3897308, -20.8717136, 55.2164268, 55.8366924],
-			'Romania': [43.618682, 48.2653964, 20.2619773, 30.0454257],
-			'Russia': [41.1850968, 82.0586232, 19.6389, 180],
-			'Rwanda': [-2.8389804, -1.0474083, 28.8617546, 30.8990738],
-			'Saint Barthelemy': [17.670931, 18.1375569, -63.06639, -62.5844019],
-			'Saint Helena': [-16.23, -15.704, -5.9973424, -5.4234153],
-			'Saint Kitts and Nevis': [16.895, 17.6158146, -63.051129, -62.3303519],
-			'Saint Lucia': [13.508, 14.2725, -61.2853867, -60.6669363],
-			'Saint Martin': [17.8963535, 18.1902778, -63.3605643, -62.7644063],
-			'Saint Pierre and Miquelon': [46.5507173, 47.365, -56.6972961, -55.9033333],
-			'Saint Vincent and the Grenadines': [12.5166548, 13.583, -61.6657471, -60.9094146],
-			'Samoa': [-14.2770916, -13.2381892, -173.0091864, -171.1929229],
-			'San Marino': [43.8937002, 43.992093, 12.4033246, 12.5160665],
-			'Sao Tome and Principe': [-0.2135137, 1.9257601, 6.260642, 7.6704783],
-			'Saudi Arabia': [16.29, 32.1543377, 34.4571718, 55.6666851],
-			'Senegal': [12.2372838, 16.6919712, -17.7862419, -11.3458996],
-			'Serbia': [42.2322435, 46.1900524, 18.8142875, 23.006309],
-			'Seychelles': [-10.4649258, -3.512, 45.9988759, 56.4979396],
-			'Sierra Leone': [6.755, 9.999973, -13.5003389, -10.271683],
-			'Singapore': [1.1304753, 1.4504753, 103.6920359, 104.0120359],
-			'Slovakia': [47.7314286, 49.6138162, 16.8331891, 22.56571],
-			'Slovenia': [45.4214242, 46.8766816, 13.3754696, 16.5967702],
-			'Solomon Islands': [-13.2424298, -4.81085, 155.3190556, 170.3964667],
-			'Somalia': [-1.8031969, 12.1889121, 40.98918, 51.6177696],
-			'South Africa': [-47.1788335, -22.1250301, 16.3335213, 38.2898954],
-			'South Georgia and the South Sandwich Islands': [-59.684, -53.3500755, -42.354739, -25.8468303],
-			'South Korea': [32.9104556, 38.623477, 124.354847, 132.1467806],
-			'Spain': [27.4335426, 43.9933088, -18.3936845, 4.5918885],
-			'Sri Lanka': [5.719, 10.035, 79.3959205, 82.0810141],
-			'Sudan': [8.685278, 22.224918, 21.8145046, 39.0576252],
-			'Suriname': [1.8312802, 6.225, -58.070833, -53.8433358],
-			'Svalbard and Jan Mayen': [70.6260825, 81.028076, -9.6848146, 34.6891253],
-			'Swaziland': [-27.3175201, -25.71876, 30.7908, 32.1349923],
-			'Sweden': [55.1331192, 69.0599699, 10.5930952, 24.1776819],
-			'Switzerland': [45.817995, 47.8084648, 5.9559113, 10.4922941],
-			'Syria': [32.311354, 37.3184589, 35.4714427, 42.3745687],
-			'Taiwan': [10.374269, 26.4372222, 114.3599058, 122.297],
-			'Tajikistan': [36.6711153, 41.0450935, 67.3332775, 75.1539563],
-			'Tanzania': [-11.761254, -0.9854812, 29.3269773, 40.6584071],
-			'Thailand': [5.612851, 20.4648337, 97.3438072, 105.636812],
-			'Togo': [5.926547, 11.1395102, -0.1439746, 1.8087605],
-			'Tokelau': [-9.6442499, -8.3328631, -172.7213673, -170.9797586],
-			'Tonga': [-24.1034499, -15.3655722, -179.3866055, -173.5295458],
-			'Trinidad and Tobago': [9.8732106, 11.5628372, -62.083056, -60.2895848],
-			'Tunisia': [30.230236, 37.7612052, 7.5219807, 11.8801133],
-			'Turkey': [35.8076804, 42.297, 25.6212891, 44.8176638],
-			'Turkmenistan': [35.129093, 42.7975571, 52.335076, 66.6895177],
-			'Turks and Caicos Islands': [20.9553418, 22.1630989, -72.6799046, -70.8643591],
-			'Tuvalu': [-9.9939389, -5.4369611, 175.1590468, 178.7344938],
-			'U.S. Virgin Islands': [17.623468, 18.464984, -65.159094, -64.512674],
-			'Uganda': [-1.4823179, 4.2340766, 29.573433, 35.000308],
-			'Ukraine': [44.184598, 52.3791473, 22.137059, 40.2275801],
-			'United Arab Emirates': [22.6444, 26.2822, 51.498, 56.3834],
-			'United Kingdom': [49.674, 61.061, -14.015517, 2.0919117],
-			'United States': [24.9493, 49.5904, -125.0011, -66.9326],
-			'United States Minor Outlying Islands': [6.1779744, 6.6514388, -162.6816297, -162.1339885],
-			'Uruguay': [-35.7824481, -30.0853962, -58.4948438, -53.0755833],
-			'Uzbekistan': [37.1821164, 45.590118, 55.9977865, 73.1397362],
-			'Vanuatu': [-20.4627425, -12.8713777, 166.3355255, 170.449982],
-			'Vatican': [41.9002044, 41.9073912, 12.4457442, 12.4583653],
-			'Venezuela': [0.647529, 15.9158431, -73.3529632, -59.5427079],
-			'Vietnam': [8.1790665, 23.393395, 102.14441, 114.3337595],
-			'Wallis and Futuna': [-14.5630748, -12.9827961, -178.3873749, -175.9190391],
-			'Western Sahara': [20.556883, 27.6666834, -17.3494721, -8.666389],
-			'Yemen': [11.9084802, 19.0, 41.60825, 54.7389375],
-			'Zambia': [-18.0765945, -8.2712822, 21.9993509, 33.701111],
-			'Zimbabwe': [-22.4241096, -15.6097033, 25.2373, 33.0683413]
-		}
-	def ReverseGeocoding(self, lat, lng):
-		countries = []
-		for country, box in self.bbox.items():
-			if lat >= box[0] and lat <= box[1] and lng >= box[2] and lng <= box[3]:
-				countries.append(country)
-		if not countries:
-			return "Earth"
-		else:
-			return '/'.join(countries)
-	def lookup(self, mac):
-		url = "https://hashc.co.uk/api/locate/mac/"
-		data = {
-			'apikey': hashC_APIKEY,
-			'mac': mac
-		}
-		try:
-			response = requests.post(url, data=data, timeout=30)
-			response_json = response.json()
-			lat, lng = response_json.get('lat'), response_json.get('lng')
-			if lat and lng:
-				return '{} ({}, {})'.format(self.ReverseGeocoding(lat, lng), lat, lng)
-			return response_json
-		except:
-			return {}
+MAC_VENDOR = MAC_VENDOR_LOOKUP(OUI_DB_FILE, OUI_DB_URL)
 ##################
 
 ### Database-Like ###
@@ -867,11 +588,11 @@ class Status(object):
 		self.current_packet += 1
 	def set_filepos(self, filepos):
 		self.current_filepos = filepos
+STATUS = Status()
 ###
 
 ### HX-Functions ###
 def get_essid_from_tag(packet, header, length_skip):
-	global custom_essid
 	if length_skip > header['caplen']:
 		return -1, None
 	length = header['caplen'] - length_skip
@@ -890,8 +611,8 @@ def get_essid_from_tag(packet, header, length_skip):
 		if tagtype == MFIE_TYPE_SSID:
 			if taglen <= MAX_ESSID_LEN:
 				essid = {}
-				if len(custom_essid) > 0:
-					essid['essid'] = custom_essid
+				if len(CUSTOM_ESSID) > 0:
+					essid['essid'] = CUSTOM_ESSID
 					essid['essid_len'] = len(essid['essid'])
 					essid['essid'] += b'\x00'*(MAX_ESSID_LEN - len(essid['essid']))
 				else:
@@ -1193,8 +914,8 @@ def read_pcapng_file_header(pcapng):
 
 ######################### PROCESS PACKETS #########################
 
-def process_packet(packet, header, Q):
-	if not Q:
+def process_packet(packet, header):
+	if not QUIET:
 		xprint("Reading file: {}/{} ({} packets)".format(STATUS.current_filepos, STATUS.total_filesize, STATUS.current_packet), end='\r')
 	if (header['caplen'] < SIZE_OF_ieee80211_hdr_3addr_t):
 		return
@@ -1415,7 +1136,7 @@ def process_packet(packet, header, Q):
 
 ######################### READ PACKETS #########################
 
-def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False, Q=True):
+def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -1531,10 +1252,10 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False, Q=Tr
 			continue
 		else:
 			try:
-				if not Q:
+				if not QUIET:
 					STATUS.step_packet()
 					STATUS.set_filepos(cap_file.tell())
-				process_packet(packet, header, Q)
+				process_packet(packet, header)
 			except ValueError as e:
 				LOGGER.log(str(e), WARNING)
 				continue
@@ -1546,7 +1267,7 @@ def read_pcap_packets(cap_file, pcap_file_header, bitness, ignore_ts=False, Q=Tr
 		else:
 			raise ValueError('Something went wrong')
 
-def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, ignore_ts=False, Q=True):
+def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, ignore_ts=False):
 	header_count = 0
 	header_error = None
 	packet_count = 0
@@ -1674,10 +1395,10 @@ def read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsreso
 			continue
 		else:
 			try:
-				if not Q:
+				if not QUIET:
 					STATUS.step_packet()
 					STATUS.set_filepos(cap_file.tell())
-				process_packet(packet, header, Q)
+				process_packet(packet, header)
 			except ValueError as e:
 				LOGGER.log(str(e), WARNING)
 				continue
@@ -1701,7 +1422,7 @@ def __xbuild__(Builder, DB, essid_list):
 	Builder.__build__(DB, essid_list)
 
 class Builder(object):
-	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None, do_not_clean=False, ignore_ie=False, locate=False, Q=True):
+	def __init__(self, export, export_unauthenticated=False, filters=None, group_by=None, do_not_clean=False, ignore_ie=False):
 		super(Builder, self).__init__()
 		self.export = export
 		self.export_unauthenticated = export_unauthenticated
@@ -1709,8 +1430,6 @@ class Builder(object):
 		self.group_by = group_by
 		self.do_not_clean = do_not_clean
 		self.ignore_ie = ignore_ie
-		self.locate = locate
-		self.Q = Q
 		# Workers Manager
 		manager = Manager()
 		# Lists were we store requested DB operations from our workers
@@ -1751,7 +1470,7 @@ class Builder(object):
 			bssid = bytes(essid['bssid']).hex()
 			essidf = essid['essid'].decode(encoding='utf-8', errors='ignore').rstrip('\x00')
 			bssidf = ':'.join(bssid[i:i+2] for i in range(0,12,2))
-			if not self.Q:
+			if not QUIET:
 				xprint('\n|*| BSSID={} ESSID={} ({}){}'.format( \
 					bssidf, \
 					essidf, \
@@ -1763,7 +1482,7 @@ class Builder(object):
 				continue
 			##############
 			### STATS (1/2) ###
-			if not self.Q:
+			if not QUIET:
 				FRAMES_EAPOL_M1 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_1, 0)
 				FRAMES_EAPOL_M2 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_2, 0)
 				FRAMES_EAPOL_M3 = DB.statistics[essid['bssid']].get(EXC_PKT_NUM_3, 0)
@@ -1772,14 +1491,12 @@ class Builder(object):
 				FRAMES_ASSOC = DB.statistics[essid['bssid']].get(ESSID_SOURCE_ASSOC, 0)
 				FRAMES_REASSOC = DB.statistics[essid['bssid']].get(ESSID_SOURCE_REASSOC, 0)
 				FRAMES_PROBE = DB.statistics[essid['bssid']].get(ESSID_SOURCE_PROBE, 0)
-				if self.locate:
-					xprint('| | GEOLOCATION: {}'.format(MAC_GEO.lookup(bssidf)))
 				xprint('| | EAPOL-M1: {}, EAPOL-M2: {}, EAPOL-M3: {}, EAPOL-M4: {}'.format(FRAMES_EAPOL_M1, FRAMES_EAPOL_M2, FRAMES_EAPOL_M3, FRAMES_EAPOL_M4))
 				xprint('| | BEACON: {}, ASSOC: {}, REASSOC: {}, PROBE: {}'.format(FRAMES_BEACON, FRAMES_ASSOC, FRAMES_REASSOC, FRAMES_PROBE))
 			###################
 			if self.export not in ['hceapmd5', 'hceapleap']:
 				### STATS (2/2) ###
-				if not self.Q:
+				if not QUIET:
 					if FRAMES_EAPOL_M1 < 2:
 						xprint('| ! WARNING! Not enough EAPOL-M1 frames. This makes it impossible to calculate nonce-error-correction values.')
 					if (FRAMES_ASSOC + FRAMES_REASSOC) == 0:
@@ -1888,7 +1605,7 @@ class Builder(object):
 								mac_sta = bytes(excpkt_sta['mac_sta']).hex()
 								if skip == 0:
 									if auth == 1:
-										if not self.Q:
+										if not QUIET:
 											xprint('| > STA={}, Message Pair={}, Replay Counter={}, Time Gap={}, Authenticated=Y'.format( \
 												':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 												message_pair, \
@@ -1896,7 +1613,7 @@ class Builder(object):
 												abs(excpkt_ap['tv_abs'] - excpkt_sta['tv_abs']) \
 											))
 									else:
-										if not self.Q:
+										if not QUIET:
 											xprint('| > STA={}, Message Pair={}, Replay Counter={}, Time Gap={}, Authenticated=N{}{}'.format( \
 												':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 												message_pair, \
@@ -1908,7 +1625,7 @@ class Builder(object):
 										if not self.export_unauthenticated:
 											continue
 								else:
-									if not self.Q:
+									if not QUIET:
 										xprint('| > STA={}, Message Pair={} [Skipped]'.format( \
 											':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 											message_pair \
@@ -1981,7 +1698,7 @@ class Builder(object):
 						if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256, AK_SAFE]):
 							self.DB_hcwpaxs_add(signature=HCWPAX_SIGNATURE, ftype="01", pmkid_or_mic=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 							mac_sta = pmkid['mac_sta']
-							if not self.Q:
+							if not QUIET:
 								xprint('| > STA={} [PMKID {}]'.format( \
 									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 									pmkid['pmkid'] \
@@ -1991,7 +1708,7 @@ class Builder(object):
 						if pmkid['mac_ap'] == bssid and (self.ignore_ie or pmkid['akm'] in [AK_PSK, AK_PSKSHA256, AK_SAFE]):
 							self.DB_hcpmkid_add(pmkid=pmkid['pmkid'], mac_ap=pmkid['mac_ap'], mac_sta=pmkid['mac_sta'], essid=essid['essid'][:essid['essid_len']])
 							mac_sta = pmkid['mac_sta']
-							if not self.Q:
+							if not QUIET:
 								xprint('| > STA={} [PMKID {}]'.format( \
 									':'.join(mac_sta[i:i+2] for i in range(0,12,2)), \
 									pmkid['pmkid'] \
@@ -2002,7 +1719,7 @@ class Builder(object):
 				eapmd5s_AP_ = DB.eapmd5s.get(essid['bssid'])
 				if eapmd5s_AP_:
 					for eapmd5s_AP_STA_ in eapmd5s_AP_.values():
-						if not self.Q:
+						if not QUIET:
 							xprint('| > STA={}, ID={}'.format( \
 								':'.join(bytes(eapmd5s_AP_STA_['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 								eapmd5s_AP_STA_['id'] \
@@ -2014,7 +1731,7 @@ class Builder(object):
 				eapleaps_AP_ = DB.eapleaps.get(essid['bssid'])
 				if eapleaps_AP_:
 					for eapleaps_AP_STA_ in eapleaps_AP_.values():
-						if not self.Q:
+						if not QUIET:
 							xprint('| > STA={}, ID={}, NAME={}'.format( \
 								':'.join(bytes(eapleaps_AP_STA_['mac_sta']).hex()[i:i+2] for i in range(0,12,2)), \
 								eapleaps_AP_STA_['id'], \
@@ -2102,41 +1819,34 @@ class Builder(object):
 
 ######################### MAIN #########################
 
-def main(Q):
-	global custom_essid
-	if args.cloaked_essid:
-		custom_essid = bytes(args.cloaked_essid,'utf-8')
+def main():
+	global CUSTOM_ESSID
+	if args.overwrite_essid:
+		CUSTOM_ESSID = bytes(args.overwrite_essid, "utf-8")
 	if os.path.isfile(args.input):
 		cap_file = read_file(args.input)
-		if not Q:
+		if not QUIET:
 			STATUS.set_filesize(get_filesize(cap_file))
 		try:
 			if args.input.lower().endswith('.pcapng') or args.input.lower().endswith('.pcapng.gz'):
-				try:
-					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, args.ignore_ts, Q)
-				except:
-					cap_file.seek(0)
-					pcap_file_header, bitness = read_pcap_file_header(cap_file)
-					read_pcap_packets(cap_file, pcap_file_header, bitness, args.ignore_ts, Q)
+				for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
+					read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, args.ignore_ts)
+			elif args.input.lower().endswith('.cap') or args.input.lower().endswith('.cap.gz') or args.input.lower().endswith('.pcap') or args.input.lower().endswith('.pcap.gz'):
+				pcap_file_header, bitness = read_pcap_file_header(cap_file)
+				read_pcap_packets(cap_file, pcap_file_header, bitness, args.ignore_ts)
 			else:
-				try:
-					pcap_file_header, bitness = read_pcap_file_header(cap_file)
-					read_pcap_packets(cap_file, pcap_file_header, bitness, args.ignore_ts, Q)
-				except:
-					cap_file.seek(0)
-					for pcapng_file_header, bitness, if_tsresol, pcapng in read_pcapng_file_header(cap_file):
-						read_pcapng_packets(cap_file, pcapng, pcapng_file_header, bitness, if_tsresol, args.ignore_ts, Q)
+				raise ValueError("Unsupported capture file")
 		except ValueError as error:
 			xprint(str(error))
-			exit()
+			xprint("This may be due to using the wrong file extension (.pcap instead of .pcapng or vice versa)")
+			sys.exit(1)
 		else:
 			cap_file.close()
-			if not Q:
+			if not QUIET:
 				xprint(' '*77, end='\r')
 				if len(DB.essids) == 0 and len(DB.excpkts) == 0 and len(DB.eapmd5s) == 0 and len(DB.eapleaps) == 0:
 					xprint("[!] No Networks found\n")
-					exit()
+					sys.exit(0)
 
 				xprint("[i] Networks detected: {}".format(len(DB.essids)))
 
@@ -2151,7 +1861,7 @@ def main(Q):
 				for message, count in LOGGER.debug.items():
 					xprint('[@] {}: {}'.format(message, count))
 
-			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie, locate=args.locate, Q=Q).build()
+			Builder(export=args.export, export_unauthenticated=args.all, filters=args.filter_by, group_by=args.group_by, do_not_clean=args.do_not_clean, ignore_ie=args.ignore_ie).build()
 
 			if args.wordlist and len(DB.passwords):
 				xprint("\nMiscellaneous:")
@@ -2273,43 +1983,61 @@ def main(Q):
 					for hceapleap in DB.hceapleaps.values():
 						hceapleap_line = ':'.join(hceapleap.values())
 						print(hceapleap_line)
-			elif not Q:
+			elif not QUIET:
 				xprint("\nNothing exported. You may want to: "+ \
 					("\n- Try a different export format (-x/--export)")+ \
 					("\n- Use -a/--all to export unauthenticated handshakes" if not args.all else "")+ \
+					("\n- Clear the filter (-f/--filter-by)" if args.filter_by != [None, None] else "")+ \
 					("\n- Use --ignore-ie to ignore ie (AKM Check) (Not Recommended)" if not args.ignore_ie else "")+ \
 					("\n- Use --ignore-ts to ignore timestamps check (Not Recommended)" if (not args.ignore_ts and LOGGER.warning.get('Zero value timestamps detected')) else "")+ \
-					("\n- Remove the filter (-f/--filter-by)" if args.filter_by != [None, None] else "") \
+					("\n- Use --overwrite-essid to set a custom essid (useful for cloaked ESSID) (DANGEROUS)" if not args.overwrite_essid else "") \
 				)
 			xprint()
 	else:
 		xprint(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input))
-		exit()
+		sys.exit(2)
 
 #########################
 #########################
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Convert a cap/pcap/pcapng capture file to a hashcat hcwpax/hccapx/hccap/hcpmkid/hceapmd5/hceapleap file', add_help=False)
-	required = parser.add_argument_group('required arguments')
-	optional = parser.add_argument_group('optional arguments')
-	required.add_argument("--input", "-i", help="Input capture file", metavar="capture.cap", required=True)
-	required.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hccap', 'hcpmkid', 'hceapmd5', 'hceapleap'], required=True)
-	optional.add_argument("--output", "-o", help="Output file", metavar="capture.hcwpax")
-	optional.add_argument("--cloaked-essid",help="let user add ESSID to beacon when missing (cloaked ESSID)")
-	optional.add_argument("--all", "-a", help="Export all handshakes even unauthenticated ones", action="store_true")
-	optional.add_argument("--filter-by", "-f", nargs=2, metavar=('filter-by', 'filter'), help="--filter-by {bssid XX:XX:XX:XX:XX:XX, essid ESSID}", default=[None, None])
-	optional.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
-	optional.add_argument("--wordlist", "-E", help="Extract wordlist / AP-LESS possible passwords (autohex enabled on non ASCII characters)", metavar="wordlist.txt")
-	optional.add_argument("--do-not-clean", help="Do not clean output", action="store_true")
-	optional.add_argument("--ignore-ie", help="Ignore information element (AKM Check) (Not Recommended)", action="store_true")
-	optional.add_argument("--ignore-ts", help="Ignore timestamps check (Not Recommended)", action="store_true")
-	optional.add_argument("--quiet", "-q", help="Enable quiet mode (print only output files/data)", action="store_true")
-	optional.add_argument("--update-oui", help="Update OUI Database", action="store_true")
-	optional.add_argument("--locate", help="Locate networks geolocations", action="store_true")
-	optional.add_argument("--version", "-v", action='version', version=__version__)
-	optional.add_argument("--help", "-h", action='help', default=argparse.SUPPRESS,	help='show this help message and exit')
+
+	optionsGroup = parser.add_argument_group('options')
+	filterOptionsGroup = parser.add_argument_group('filter options')
+	advancedOptionsGroup = parser.add_argument_group('advanced options')
+	miscellaneousOptionsGroup = parser.add_argument_group('miscellaneous options')
+	infoGroup = parser.add_argument_group('info')
+
+	optionsGroup.add_argument("--input", "-i", metavar="capture.pcapng")
+	optionsGroup.add_argument("--export", "-x", choices=['hcwpax', 'hccapx', 'hccap', 'hcpmkid', 'hceapmd5', 'hceapleap'], default="hcwpax")
+	optionsGroup.add_argument("--output", "-o", metavar="capture.hcwpax")
+	filterOptionsGroup.add_argument("--all", "-a", help="export all handshakes even unauthenticated ones", action="store_true")
+	filterOptionsGroup.add_argument("--filter-by", "-f", nargs=2, metavar=('filter', 'value'), help="valid filters: bssid and essid", default=[None, None])
+	filterOptionsGroup.add_argument("--group-by", "-g", choices=['none', 'bssid', 'essid', 'handshake'], default='bssid')
+	advancedOptionsGroup.add_argument("--ignore-ie", help="ignore information element (AKM Check) (Not Recommended)", action="store_true")
+	advancedOptionsGroup.add_argument("--ignore-ts", help="ignore timestamps check (Not Recommended)", action="store_true")
+	advancedOptionsGroup.add_argument("--overwrite-essid", metavar="ESSID", help="overwrite ESSID tags (useful for cloaked ESSID) (DANGEROUS)")
+	miscellaneousOptionsGroup.add_argument("--wordlist", "-E", help="extract wordlist / AP-LESS possible passwords (autohex enabled on non ASCII characters)", metavar="wordlist.txt")
+	miscellaneousOptionsGroup.add_argument("--do-not-clean", help="do not clean output", action="store_true")
+	miscellaneousOptionsGroup.add_argument("--quiet", "-q", help="enable quiet mode (print only output files/data)", action="store_true")
+	miscellaneousOptionsGroup.add_argument("--update-oui", help="update OUI Database", action="store_true")
+	infoGroup.add_argument("--about", help="show program's about and exit", action="store_true")
+	infoGroup.add_argument("--version", "-v", action="version", version=__version__)
+	infoGroup.add_argument("--help", "-h", action="help", default=argparse.SUPPRESS, help="show this help message and exit")
+
 	args = parser.parse_args()
+
+	if args.about:
+		print("Author: {}".format(__author__))
+		print("Credits: {}".format(', '.join(__credits__)))
+		print("License: {}".format(__license__))
+		print("Maintainer: {}".format(__maintainer__))
+		print("Email: {}".format(__email__))
+		print("Version: {}".format(__version__))
+		print("GitHub: {}".format(__github__))
+		sys.exit(0)
+
 	if args.filter_by[0]:
 		if args.filter_by[0] not in ['bssid', 'essid']:
 			argparse.ArgumentParser.error(parser, 'argument --filter-by/-f: must be either bssid XX:XX:XX:XX:XX:XX or essid ESSID')
@@ -2317,17 +2045,21 @@ if __name__ == '__main__':
 			args.filter_by[1] = get_valid_bssid(args.filter_by[1])
 			if not args.filter_by[1]:
 				argparse.ArgumentParser.error(parser, 'in argument --filter-by/-f: bssid is not valid')
+
+	if args.update_oui:
+		MAC_VENDOR.download_data()
+		MAC_VENDOR.load_data()
+
+	if not args.input:
+		if args.update_oui:
+			sys.exit(0)
+		parser.print_usage()
+		print("{}: error: the following arguments are required: --input/-i".format(sys.argv[0]))
+		sys.exit(3)
+
 	if args.quiet:
-		Q = True
+		QUIET = True
 		def xprint(text="", end='\n', flush=True):
 			pass
-	else:
-		Q = False
-		STATUS = Status()
-		MAC_VENDOR = MAC_VENDOR_LOOKUP(OUI_DB_FILE)
-		if args.update_oui:
-			MAC_VENDOR.download_db(OUI_DB_FILE)
-			MAC_VENDOR.load_data()
-		if args.locate:
-			MAC_GEO = MAC_GEO_LOOKUP()
-	main(Q)
+
+	main()

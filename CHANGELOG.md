@@ -2,8 +2,16 @@
 
 All notable changes to this project (multicapconverter) will be documented in this file.
 
+## [1.2.0] - 26/04/2022
+### Changed
+- Renamed cloaked-essid argument to overwrite-essid
+- Default export option set to hcwpax
+### Removed
+- MAC GEOLOCATION LOOKUP (--locate)
+
 ## [1.1.2] - 22/04/2022
-- Added feature to let user indicate ESSID when missing from pcap file (cloaked ESSID)
+### Added
+- Feature to let user indicate ESSID when missing from pcap file (cloaked ESSID)
 
 ## [1.1.1] - 26/10/2020
 ### Fixed
@@ -16,7 +24,6 @@ All notable changes to this project (multicapconverter) will be documented in th
 
 ### Changed
 - OUI_DB_FILE set to an absolute path
-
 
 ## [1.0.0] - 24/03/2020
 ### Fixed
